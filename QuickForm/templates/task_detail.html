@@ -160,40 +160,17 @@ function sendTestData() {
                                 <td>{{ sub.id }}</td>
                                 <td>{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                                 <td>
-                                    <button type="button" class="btn btn-link p-0" onclick="showModal('dataModal-{{ sub.id }}');">
+                                    <button 
+                                        type="button" 
+                                        class="btn btn-link p-0"
+                                        data-sub-id="{{ sub.id }}"
+                                        data-sub-time="{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S') }}"
+                                        data-sub-data='{{ sub.data | tojson | safe }}'
+                                        onclick="openDataModal(this);">
                                         查看数据
                                     </button>
                                 </td>
                             </tr>
-                            
-                            <!-- 自定义数据详情模态框 - 解决浏览器兼容性问题 -->
-                            <div id="dataModal-{{ sub.id }}" class="modal" tabindex="-1" aria-labelledby="dataModalLabel-{{ sub.id }}" aria-hidden="true" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1050; overflow: hidden;">
-                                <!-- 移除背景遮罩 -->
-                                
-                                <!-- 模态框外部容器 - 防止鼠标事件影响模态框 -->
-                                <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1040;" onclick="event.stopPropagation();">
-                                <!-- 模态框容器 - 固定在页面中央 -->
-                                <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 1050; margin: 0; display: flex; align-items: center; justify-content: center;" onclick="event.stopPropagation();">
-                                    <!-- 模态框内容 - 简化样式 -->
-                                    <div class="modal-content" style="width: 90%; height: 90%; max-height: 500px; max-width: 900px; display: flex; flex-direction: column; background: white; margin: 0; padding: 0;" onclick="event.stopPropagation();">
-                                        <div class="modal-header" style="padding: 10px 15px; border-bottom: 1px solid #dee2e6; margin: 0;" onclick="event.stopPropagation();">
-                                            <h5 class="modal-title" id="dataModalLabel-{{ sub.id }}" style="margin: 0; font-size: 16px;" onclick="event.stopPropagation();">提交数据详情 #{{ sub.id }}</h5>
-                                            <button type="button" class="btn-close" onclick="closeModal('dataModal-{{ sub.id }}');" aria-label="Close"></button>
-                                        </div>
-                                        <div class="modal-body" style="padding: 15px; flex-grow: 1; overflow-y: auto; margin: 0;" onclick="event.stopPropagation();">
-                                            <p style="margin: 0 0 10px 0; font-size: 14px;" onclick="event.stopPropagation();"><strong>提交时间：</strong>{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
-                                            <div style="margin: 0;" onclick="event.stopPropagation();">
-                                                <h6 style="margin: 0 0 8px 0; font-size: 14px;" onclick="event.stopPropagation();">数据内容：</h6>
-                                                <pre class="bg-light p-3 rounded overflow-auto" style="font-size: 16px; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; margin: 0; min-height: 300px;" onclick="event.stopPropagation();">{{ sub.data }}</pre>
-                                            </div>
-                                        </div>
-                                        <div class="modal-footer" style="padding: 10px 15px; border-top: 1px solid #dee2e6; justify-content: flex-end; margin: 0;" onclick="event.stopPropagation();">
-                                            <button type="button" class="btn btn-secondary" onclick="closeModal('dataModal-{{ sub.id }}');">关闭</button>
-                                        </div>
-                                    </div>
-                                </div>
-                                </div>
-                            </div>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -258,41 +235,52 @@ function sendTestData() {
         }, 2000);
     }
 
-    // 简化的模态框显示函数
-    function showModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            // 确保模态框固定在屏幕中央
-            modal.style.display = 'block';
-            // 阻止事件冒泡
-            modal.addEventListener('mousemove', function(e) {
-                e.stopPropagation();
-            });
-            modal.addEventListener('mouseenter', function(e) {
-                e.stopPropagation();
-            });
-            modal.addEventListener('mouseleave', function(e) {
-                e.stopPropagation();
-            });
-        }
-    }
+    // 单一全局模态框，避免滚动时出现多个悬浮窗
+    (function ensureSingleModal(){
+        if (document.getElementById('singleDataModal')) return;
+        const modalWrap = document.createElement('div');
+        modalWrap.id = 'singleDataModal';
+        modalWrap.style.cssText = 'display:none; position:fixed; inset:0; z-index:1050;';
+        modalWrap.innerHTML = `
+            <div style="position:fixed; inset:0; background:rgba(0,0,0,0.2);"></div>
+            <div style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); margin:0; display:flex; align-items:center; justify-content:center;">
+                <div class="modal-content" style="width:90%; height:90%; max-height:500px; max-width:900px; display:flex; flex-direction:column; background:white; margin:0; padding:0;">
+                    <div class="modal-header" style="padding:10px 15px; border-bottom:1px solid #dee2e6; margin:0;">
+                        <h5 id="singleDataModalTitle" class="modal-title" style="margin:0; font-size:16px;">提交数据详情</h5>
+                        <button type="button" class="btn-close" onclick="hideDataModal()" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body" style="padding:15px; flex-grow:1; overflow-y:auto; margin:0;">
+                        <p style="margin:0 0 10px 0; font-size:14px;"><strong>提交时间：</strong><span id="singleDataModalTime"></span></p>
+                        <div style="margin:0;">
+                            <h6 style="margin:0 0 8px 0; font-size:14px;">数据内容：</h6>
+                            <pre id="singleDataModalContent" class="bg-light p-3 rounded overflow-auto" style="font-size:16px; line-height:1.6; white-space:pre-wrap; word-wrap:break-word; margin:0; min-height:300px;"></pre>
+                        </div>
+                    </div>
+                    <div class="modal-footer" style="padding:10px 15px; border-top:1px solid #dee2e6; justify-content:flex-end; margin:0;">
+                        <button type="button" class="btn btn-secondary" onclick="hideDataModal()">关闭</button>
+                    </div>
+                </div>
+            </div>`;
+        document.body.appendChild(modalWrap);
+        // 点击遮罩关闭
+        modalWrap.firstElementChild.addEventListener('click', hideDataModal);
+    })();
 
-    // 简化的模态框关闭函数
-    function closeModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.style.display = 'none';
-            // 移除事件监听器
-            modal.removeEventListener('mousemove', function(e) {
-                e.stopPropagation();
-            });
-            modal.removeEventListener('mouseenter', function(e) {
-                e.stopPropagation();
-            });
-            modal.removeEventListener('mouseleave', function(e) {
-                e.stopPropagation();
-            });
-        }
+    function openDataModal(btn){
+        const wrap = document.getElementById('singleDataModal');
+        if (!wrap) return;
+        const id = btn.getAttribute('data-sub-id') || '';
+        const t = btn.getAttribute('data-sub-time') || '';
+        let d = btn.getAttribute('data-sub-data') || '';
+        try { d = JSON.stringify(JSON.parse(d), null, 2); } catch(e) {}
+        document.getElementById('singleDataModalTitle').textContent = '提交数据详情 #' + id;
+        document.getElementById('singleDataModalTime').textContent = t;
+        document.getElementById('singleDataModalContent').textContent = d;
+        wrap.style.display = 'block';
+    }
+    function hideDataModal(){
+        const wrap = document.getElementById('singleDataModal');
+        if (wrap) wrap.style.display = 'none';
     }
 
     // 移除可能导致频闪的事件监听器

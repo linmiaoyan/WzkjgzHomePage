@@ -345,9 +345,7 @@ def generate_analysis_prompt(task, submission=None, file_content=None):
     else:
         prompt += "暂无提交数据\n"
     
-    if file_content:
-        prompt += f"\n附件内容摘要：\n{file_content[:1000]}...\n" if len(file_content) > 1000 else f"\n附件内容：\n{file_content}\n"
-    
+
     prompt += """
 
 请提供一个全面的数据分析报告，包括但不限于：
@@ -706,7 +704,8 @@ def perform_analysis_with_custom_prompt(task_id, user_id, ai_config_id, custom_p
             }
         logging.info(f"任务 {task_id}：调用AI模型进行分析")
         
-        timeout_seconds = 120 if ai_config.selected_model == 'deepseek' else (120 if ai_config.selected_model == 'qwen' else 90)
+        # 调整各模型超时，避免后端刚返回而前端已判定超时的情况
+        timeout_seconds = 180 if ai_config.selected_model == 'chat_server' else (120 if ai_config.selected_model in ['deepseek', 'qwen'] else 90)
         
         @timeout(seconds=timeout_seconds, error_message=f"调用{ai_config.selected_model}模型超时（{timeout_seconds}秒）")
         def call_ai_with_timeout(prompt, config):
@@ -1248,8 +1247,11 @@ def smart_analyze(task_id):
                     file_content_for_prompt = read_file_content(task.file_path)
                 custom_prompt = generate_analysis_prompt(task, submission_for_prompt, file_content_for_prompt)
             try:
-                perform_analysis_with_custom_prompt(task_id, current_user.id, ai_config.id, custom_prompt)
-                db.refresh(task)
+                # 后台线程执行，避免阻塞主请求线程
+                t = threading.Thread(target=perform_analysis_with_custom_prompt, args=(task_id, current_user.id, ai_config.id, custom_prompt), daemon=True)
+                t.start()
+                # 跳转到本页并标记运行中，前端据此开始轮询
+                return redirect(url_for('quickform.smart_analyze', task_id=task.id, running=1))
             except Exception as e:
                 return render_template('smart_analyze.html', task=task, error=f'生成报告失败: {str(e)}', ai_config=ai_config, now=datetime.now())
         
@@ -1339,8 +1341,30 @@ def generate_report(task_id):
 @quickform_bp.route('/api/report_status/<int:task_id>', methods=['GET'])
 @login_required
 def report_status(task_id):
-    """已弃用：不再使用异步轮询，统一返回错误"""
-    return jsonify({'error': '异步查询已停用，请在智能分析页面直接生成并查看报告'}), 410
+    """查询报告生成进度/结果（供前端轮询）"""
+    try:
+        with progress_lock:
+            prog = analysis_progress.get(task_id)
+            if prog:
+                # 如果已完成且内存中有报告，直接返回报告
+                if prog.get('status') == 'completed':
+                    rep = analysis_results.get(task_id)
+                    return jsonify({'status': 'completed', 'report': rep or prog.get('report', '')}), 200
+                if prog.get('status') == 'error':
+                    return jsonify({'status': 'error', 'message': prog.get('message', '未知错误')}), 200
+                # 进行中
+                return jsonify({'status': 'in_progress', 'progress': prog.get('progress', 0), 'message': prog.get('message', '')}), 200
+        # 兜底：查数据库是否已有报告
+        db = SessionLocal()
+        try:
+            task = db.get(Task, task_id)
+            if task and task.analysis_report:
+                return jsonify({'status': 'completed', 'report': task.analysis_report}), 200
+        finally:
+            db.close()
+        return jsonify({'status': 'not_started'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @quickform_bp.route('/admin')
 @admin_required

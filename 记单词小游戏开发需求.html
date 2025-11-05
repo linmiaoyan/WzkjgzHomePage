@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>英语单词记忆小游戏</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+        
+        body {
+            background-color: #f5f7fa;
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            padding: 30px;
+        }
+        
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 20px;
+        }
+        
+        .game-info {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #7f8c8d;
+        }
+        
+        .word-card {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        
+        .word {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        
+        .options {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        
+        .option {
+            padding: 12px;
+            background-color: #e9ecef;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        
+        .option:hover {
+            background-color: #dee2e6;
+        }
+        
+        .option.selected {
+            background-color: #3498db;
+            color: white;
+        }
+        
+        .option.correct {
+            background-color: #2ecc71;
+            color: white;
+        }
+        
+        .option.incorrect {
+            background-color: #e74c3c;
+            color: white;
+        }
+        
+        .student-id-section {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            display: none;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+            width: 100%;
+        }
+        
+        button:hover {
+            background-color: #2980b9;
+        }
+        
+        button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+        }
+        
+        .result {
+            text-align: center;
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            display: none;
+        }
+        
+        .result.success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .result.error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        
+        .progress-bar {
+            height: 6px;
+            background-color: #ecf0f1;
+            border-radius: 3px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        
+        .progress {
+            height: 100%;
+            background-color: #3498db;
+            width: 0%;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>英语单词记忆小游戏</h1>
+        <div class="game-info">
+            <p>从每个单词的选项中选择正确的中文释义</p>
+        </div>
+        
+        <div class="progress-bar">
+            <div class="progress" id="progress"></div>
+        </div>
+        
+        <div id="game-area">
+            <!-- 单词卡片会通过JavaScript动态生成 -->
+        </div>
+        
+        <button id="submit-btn" disabled>提交答案</button>
+        
+        <div class="student-id-section" id="student-id-section">
+            <h3>测试完成！请输入您的学号</h3>
+            <input type="text" id="student-id" placeholder="请输入学号">
+            <button id="upload-btn">上传成绩</button>
+        </div>
+        
+        <div class="result" id="send-result"></div>
+    </div>
+
+    <script>
+        // 单词库 - 每个单词包含英文和正确的中文释义，以及几个错误选项
+        const wordBank = [
+            { word: "apple", correct: "苹果", options: ["苹果", "香蕉", "梨子", "桃子"] },
+            { word: "book", correct: "书", options: ["书", "笔", "纸", "桌子"] },
+            { word: "computer", correct: "电脑", options: ["电脑", "手机", "电视", "平板"] },
+            { word: "water", correct: "水", options: ["水", "火", "土", "空气"] },
+            { word: "friend", correct: "朋友", options: ["朋友", "家人", "同学", "老师"] },
+            { word: "school", correct: "学校", options: ["学校", "家", "公司", "医院"] },
+            { word: "happy", correct: "快乐的", options: ["快乐的", "悲伤的", "愤怒的", "惊讶的"] },
+            { word: "run", correct: "跑步", options: ["跑步", "走路", "跳跃", "游泳"] },
+            { word: "blue", correct: "蓝色", options: ["蓝色", "红色", "绿色", "黄色"] },
+            { word: "music", correct: "音乐", options: ["音乐", "电影", "游戏", "艺术"] },
+            { word: "time", correct: "时间", options: ["时间", "空间", "地点", "速度"] },
+            { word: "love", correct: "爱", options: ["爱", "恨", "喜欢", "厌恶"] }
+        ];
+        
+        // 游戏状态
+        let gameState = {
+            currentWords: [],
+            userSelections: {},
+            startTime: null,
+            endTime: null,
+            score: 0
+        };
+        
+        // DOM元素
+        const gameArea = document.getElementById('game-area');
+        const submitBtn = document.getElementById('submit-btn');
+        const studentIdSection = document.getElementById('student-id-section');
+        const studentIdInput = document.getElementById('student-id');
+        const uploadBtn = document.getElementById('upload-btn');
+        const sendResult = document.getElementById('send-result');
+        const progressBar = document.getElementById('progress');
+        
+        // 初始化游戏
+        function initGame() {
+            // 重置游戏状态
+            gameState.currentWords = getRandomWords(3);
+            gameState.userSelections = {};
+            gameState.startTime = new Date();
+            gameState.score = 0;
+            
+            // 清空游戏区域
+            gameArea.innerHTML = '';
+            
+            // 生成单词卡片
+            gameState.currentWords.forEach((wordObj, index) => {
+                const wordCard = document.createElement('div');
+                wordCard.className = 'word-card';
+                wordCard.innerHTML = `
+                    <div class="word">${wordObj.word}</div>
+                    <div class="options" id="options-${index}">
+                        ${shuffleArray([...wordObj.options]).map(option => 
+                            `<div class="option" data-option="${option}">${option}</div>`
+                        ).join('')}
+                    </div>
+                `;
+                gameArea.appendChild(wordCard);
+                
+                // 添加选项点击事件
+                const options = wordCard.querySelectorAll('.option');
+                options.forEach(option => {
+                    option.addEventListener('click', function() {
+                        // 清除同一单词的其他选项的选择状态
+                        options.forEach(opt => opt.classList.remove('selected'));
+                        // 设置当前选项为选中状态
+                        this.classList.add('selected');
+                        // 记录用户选择
+                        gameState.userSelections[index] = this.dataset.option;
+                        
+                        // 检查是否所有单词都已选择
+                        checkAllSelected();
+                    });
+                });
+            });
+            
+            // 重置UI状态
+            submitBtn.disabled = true;
+            studentIdSection.style.display = 'none';
+            sendResult.style.display = 'none';
+            progressBar.style.width = '0%';
+        }
+        
+        // 从单词库中随机选择指定数量的单词
+        function getRandomWords(count) {
+            const shuffled = [...wordBank].sort(() => 0.5 - Math.random());
+            return shuffled.slice(0, count);
+        }
+        
+        // 打乱数组顺序（用于选项随机排序）
+        function shuffleArray(array) {
+            return [...array].sort(() => 0.5 - Math.random());
+        }
+        
+        // 检查是否所有单词都已选择
+        function checkAllSelected() {
+            const allSelected = gameState.currentWords.every((_, index) => 
+                gameState.userSelections[index] !== undefined
+            );
+            
+            submitBtn.disabled = !allSelected;
+            
+            // 更新进度条
+            const selectedCount = Object.keys(gameState.userSelections).length;
+            progressBar.style.width = `${(selectedCount / gameState.currentWords.length) * 100}%`;
+        }
+        
+        // 提交答案
+        function submitAnswers() {
+            gameState.endTime = new Date();
+            
+            // 计算得分
+            gameState.score = 0;
+            gameState.currentWords.forEach((wordObj, index) => {
+                if (gameState.userSelections[index] === wordObj.correct) {
+                    gameState.score++;
+                    
+                    // 标记正确选项
+                    const options = document.querySelectorAll(`#options-${index} .option`);
+                    options.forEach(option => {
+                        if (option.dataset.option === wordObj.correct) {
+                            option.classList.add('correct');
+                        }
+                    });
+                } else {
+                    // 标记错误选项和正确选项
+                    const options = document.querySelectorAll(`#options-${index} .option`);
+                    options.forEach(option => {
+                        if (option.dataset.option === gameState.userSelections[index]) {
+                            option.classList.add('incorrect');
+                        }
+                        if (option.dataset.option === wordObj.correct) {
+                            option.classList.add('correct');
+                        }
+                    });
+                }
+            });
+            
+            // 显示学号输入区域
+            studentIdSection.style.display = 'block';
+            submitBtn.disabled = true;
+        }
+        
+        // 上传数据到服务器
+        function uploadData() {
+            const studentId = studentIdInput.value.trim();
+            
+            if (!studentId) {
+                alert('请输入学号');
+                return;
+            }
+            
+            // 计算完成时间（秒）
+            const completionTime = Math.round((gameState.endTime - gameState.startTime) / 1000);
+            
+            // 计算正确率
+            const accuracy = gameState.score / gameState.currentWords.length;
+            
+            // 准备数据
+            const data = {
+                "student_id": studentId,
+                "completion_time": completionTime,
+                "accuracy": accuracy,
+                "score": gameState.score,
+                "total_questions": gameState.currentWords.length,
+                "completion_timestamp": gameState.endTime.toISOString()
+            };
+            
+            // 显示提交中状态
+            sendResult.textContent = "提交中...";
+            sendResult.className = "result";
+            sendResult.style.display = "block";
+            
+            // 发送数据
+            const url = 'http://wzkjgz.site/quickform/api/submit/075291ce-7aec-4bf2-b706-a887a9723d48';
+            
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(async r => {
+                const text = await r.text();
+                let json = {};
+                try { 
+                    json = JSON.parse(text); 
+                } catch(e) { 
+                    json = {raw: text}; 
+                }
+                
+                if (!r.ok) throw new Error(json.error || json.message || `HTTP ${r.status}`);
+                return json;
+            })
+            .then(d => {
+                sendResult.textContent = "提交成功: " + JSON.stringify(d);
+                sendResult.className = "result success";
+                console.log('提交成功:', d);
+                
+                // 3秒后重新开始游戏
+                setTimeout(() => {
+                    initGame();
+                }, 3000);
+            })
+            .catch(e => {
+                sendResult.textContent = "提交失败: " + e.message;
+                sendResult.className = "result error";
+                console.error('提交失败:', e, 'URL:', url, 'Data:', data);
+            });
+        }
+        
+        // 事件监听
+        submitBtn.addEventListener('click', submitAnswers);
+        uploadBtn.addEventListener('click', uploadData);
+        
+        // 初始化游戏
+        initGame();
+    </script>
+</body>
+</html>
