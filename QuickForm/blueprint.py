@@ -904,6 +904,9 @@ def create_task():
             
             flash('数据任务创建成功', 'success')
             return redirect(url_for('quickform.task_detail', task_id=task.id))
+        
+        # GET 渲染创建页面
+        return render_template('create_task.html')
     finally:
         db.close()
 
