@@ -70,35 +70,69 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM 检查是否有变更
-git diff --cached --quiet
-if %errorlevel% equ 0 (
-    echo [提示] 没有需要提交的变更
-    git status
+REM 检查是否有提交历史
+git rev-parse --verify HEAD >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [提示] 当前没有任何提交，需要先提交代码
     echo.
-) else (
     echo [步骤4] 提交更改
     echo.
     set /p commit_msg="请输入提交信息（直接回车使用默认信息）: "
     if "!commit_msg!"=="" set commit_msg=Initial commit: 上传项目代码
     git commit -m "!commit_msg!"
     if %errorlevel% neq 0 (
-        echo [错误] 提交失败
+        echo [错误] 提交失败，请检查是否有文件需要提交
+        git status
         pause
         exit /b 1
     )
     echo [成功] 代码已提交
     echo.
+) else (
+    REM 检查是否有未提交的变更
+    git diff --cached --quiet
+    if %errorlevel% neq 0 (
+        echo [步骤4] 提交更改
+        echo.
+        set /p commit_msg="请输入提交信息（直接回车使用默认信息）: "
+        if "!commit_msg!"=="" set commit_msg=Update: %date% %time%
+        git commit -m "!commit_msg!"
+        if %errorlevel% neq 0 (
+            echo [错误] 提交失败
+            pause
+            exit /b 1
+        )
+        echo [成功] 代码已提交
+        echo.
+    ) else (
+        echo [提示] 没有需要提交的变更
+        git status
+        echo.
+    )
 )
 
 echo [步骤5] 检查分支名称
 echo.
-git branch --show-current >nul 2>&1
-if %errorlevel% neq 0 (
+REM 获取当前分支名称
+set current_branch=
+for /f "tokens=*" %%a in ('git branch --show-current 2^>nul') do set current_branch=%%a
+
+if "!current_branch!"=="" (
     echo [提示] 当前没有分支，创建主分支...
     git branch -M main
     echo [成功] 已创建主分支 main
     echo.
+) else (
+    echo [提示] 当前分支：!current_branch!
+    if /i not "!current_branch!"=="main" (
+        echo [提示] 当前分支不是 main，正在重命名...
+        git branch -M main
+        echo [成功] 已重命名为 main
+        echo.
+    ) else (
+        echo [提示] 分支名称正确（main）
+        echo.
+    )
 )
 
 echo [步骤6] 推送到GitHub
