@@ -169,13 +169,13 @@
                         </div>
                         <div class="card-body">
                             <p class="mb-3 text-muted">如果您想重新生成分析报告，请点击下面的按钮：</p>
-                            <form id="promptForm" action="{{ url_for('quickform.generate_report', task_id=task.id) }}" method="POST" target="_blank">
+                            <form id="promptForm" action="{{ url_for('quickform.smart_analyze', task_id=task.id) }}" method="POST">
                                 <input type="hidden" name="custom_prompt" value="{{ preview_prompt }}">
                                 <div class="d-grid gap-2">
                                     <button type="submit" class="btn btn-primary btn-lg">
                                         🔄 重新生成报告
                                     </button>
-                                    <p class="text-center text-muted mt-2">分析可能需要几分钟时间，将在新窗口中显示结果。新窗口会立即打开并显示友好的等待界面。</p>
+                                    <p class="text-center text-muted mt-2">分析可能需要几分钟时间，请耐心等待，本页将直接显示结果。</p>
                                 </div>
                             </form>
                         </div>
@@ -187,7 +187,7 @@
                         </div>
                         <div class="card-body">
                             <p class="mb-3 text-muted">您可以查看和修改提示词，然后开始生成分析报告：</p>
-                            <form id="promptForm" action="{{ url_for('quickform.generate_report', task_id=task.id) }}" method="POST" target="_blank">
+                            <form id="promptForm" action="{{ url_for('quickform.smart_analyze', task_id=task.id) }}" method="POST">
                                 <div class="mb-3">
                                     <textarea name="custom_prompt" class="form-control" rows="15" style="font-family: monospace; font-size: 14px;">{{ preview_prompt }}</textarea>
                                 </div>
@@ -195,7 +195,7 @@
                                     <button type="submit" class="btn btn-primary btn-lg">
                                         🤖 开始生成报告
                                     </button>
-                                    <p class="text-center text-muted mt-2">分析可能需要几分钟时间，将在新窗口中显示结果。新窗口会立即打开并显示友好的等待界面。</p>
+                                    <p class="text-center text-muted mt-2">分析可能需要几分钟时间，请耐心等待，本页将直接显示结果。</p>
                                 </div>
                             </form>
                         </div>

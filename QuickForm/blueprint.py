@@ -906,7 +906,6 @@ def create_task():
             return redirect(url_for('quickform.task_detail', task_id=task.id))
     finally:
         db.close()
-    return render_template('create_task.html')
 
 @quickform_bp.route('/task/<int:task_id>')
 @login_required
@@ -1200,7 +1199,7 @@ def profile():
     finally:
         db.close()
 
-@quickform_bp.route('/analyze/<int:task_id>/smart_analyze', methods=['GET'])
+@quickform_bp.route('/analyze/<int:task_id>/smart_analyze', methods=['GET', 'POST'])
 @login_required
 def smart_analyze(task_id):
     """智能分析"""
@@ -1224,11 +1223,26 @@ def smart_analyze(task_id):
         elif ai_config.selected_model == 'doubao' and not ai_config.doubao_api_key:
             return render_template('smart_analyze.html', task=task, error="请先配置豆包API密钥", ai_config=ai_config, now=datetime.now())
         
+        # 如果是提交生成请求，则同步生成并返回同页结果
+        if request.method == 'POST':
+            custom_prompt = request.form.get('custom_prompt')
+            if not custom_prompt or not custom_prompt.strip():
+                submission_for_prompt = db.query(Submission).filter_by(task_id=task_id).all()
+                file_content_for_prompt = None
+                if task.file_path and os.path.exists(task.file_path):
+                    file_content_for_prompt = read_file_content(task.file_path)
+                custom_prompt = generate_analysis_prompt(task, submission_for_prompt, file_content_for_prompt)
+            try:
+                perform_analysis_with_custom_prompt(task_id, current_user.id, ai_config.id, custom_prompt)
+                db.refresh(task)
+            except Exception as e:
+                return render_template('smart_analyze.html', task=task, error=f'生成报告失败: {str(e)}', ai_config=ai_config, now=datetime.now())
+        
+        # GET 或 POST 完成后，准备页面所需数据
         submission = db.query(Submission).filter_by(task_id=task_id).all()
         file_content = None
         if task.file_path and os.path.exists(task.file_path):
             file_content = read_file_content(task.file_path)
-        
         preview_prompt = generate_analysis_prompt(task, submission, file_content)
         report = task.analysis_report if task and task.analysis_report else None
         
@@ -1304,190 +1318,14 @@ def uploaded_file(filename):
 @quickform_bp.route('/generate_report/<int:task_id>', methods=['GET', 'POST'])
 @login_required
 def generate_report(task_id):
-    """生成报告（异步）"""
-    logger.info(f"收到生成报告请求 - Task ID: {task_id}, Method: {request.method}")
-    
-    db = SessionLocal()
-    try:
-        task = db.query(Task).filter_by(id=task_id, user_id=current_user.id).first()
-        if not task:
-            logger.warning(f"任务不存在或无权访问 - Task ID: {task_id}, User ID: {current_user.id}")
-            return render_template('generate_report.html', error='任务不存在或无权访问', task=None)
-        
-        ai_config = db.query(AIConfig).filter_by(user_id=current_user.id).first()
-        if not ai_config or not ai_config.selected_model:
-            return render_template('generate_report.html', error="请先在配置页面设置AI模型和API密钥", ai_config=ai_config, task=task)
-        
-        # GET请求：显示等待页面
-        if request.method == 'GET':
-            # 检查是否有正在进行的任务
-            with progress_lock:
-                if task_id in analysis_progress:
-                    progress = analysis_progress[task_id]
-                    if progress.get('status') == 'completed':
-                        # 检查是否有结果
-                        report = None
-                        if task_id in analysis_results:
-                            report = analysis_results[task_id]
-                        elif task.analysis_report:
-                            report = task.analysis_report
-                        
-                        if report:
-                            return render_template('generate_report.html', 
-                                                 task=task, 
-                                                 report=report,
-                                                 ai_config=ai_config)
-                    elif progress.get('status') == 'in_progress':
-                        # 任务进行中，显示等待页面
-                        return render_template('generate_report.html', 
-                                             task=task, 
-                                             ai_config=ai_config,
-                                             is_processing=True)
-            
-            # 没有任务，显示初始页面（生成预览提示词）
-            preview_prompt = None
-            if not task.analysis_report:
-                submission = db.query(Submission).filter_by(task_id=task_id).all()
-                file_content = None
-                if task.file_path and os.path.exists(task.file_path):
-                    file_content = read_file_content(task.file_path)
-                preview_prompt = generate_analysis_prompt(task, submission, file_content)
-            
-            return render_template('generate_report.html', 
-                                 task=task, 
-                                 ai_config=ai_config,
-                                 preview_prompt=preview_prompt,
-                                 is_processing=False)
-        
-        # POST请求：启动异步任务
-        custom_prompt = request.form.get('custom_prompt') or request.json.get('custom_prompt') if request.is_json else None
-        
-        if not custom_prompt:
-            submission = db.query(Submission).filter_by(task_id=task_id).all()
-            file_content = None
-            if task.file_path and os.path.exists(task.file_path):
-                file_content = read_file_content(task.file_path)
-            custom_prompt = generate_analysis_prompt(task, submission, file_content)
-        
-        if not custom_prompt or not custom_prompt.strip():
-            return jsonify({'error': '提示词不能为空'}), 400
-        
-        # 检查任务是否已在运行
-        with progress_lock:
-            if task_id in analysis_progress:
-                progress = analysis_progress[task_id]
-                if progress.get('status') == 'in_progress':
-                    # 如果任务正在处理中，返回等待页面而不是错误
-                    if request.is_json:
-                        return jsonify({'error': '任务正在处理中，请稍候'}), 409
-                    else:
-                        # 返回等待页面
-                        return render_template('generate_report.html', 
-                                             task=task, 
-                                             ai_config=ai_config,
-                                             is_processing=True)
-        
-        # 启动异步任务（保存用户ID和配置ID）
-        user_id = current_user.id
-        ai_config_id = ai_config.id
-        def generate_report_task():
-            db_task = SessionLocal()
-            try:
-                perform_analysis_with_custom_prompt(task_id, user_id, ai_config_id, custom_prompt)
-            finally:
-                db_task.close()
-        
-        thread = threading.Thread(target=generate_report_task)
-        thread.daemon = True
-        thread.start()
-        
-        # 初始化进度
-        with progress_lock:
-            analysis_progress[task_id] = {
-                'status': 'in_progress',
-                'progress': 0,
-                'message': '正在准备分析...'
-            }
-        
-        if request.is_json:
-            return jsonify({'status': 'started', 'task_id': task_id})
-        else:
-            # 返回等待页面
-            return render_template('generate_report.html', 
-                                 task=task, 
-                                 ai_config=ai_config,
-                                 is_processing=True)
-            
-    except Exception as e:
-        logger.error(f"访问生成报告页面失败: {str(e)}")
-        if request.is_json:
-            return jsonify({'error': str(e)}), 500
-        return render_template('generate_report.html', 
-                             task=task if 'task' in locals() else None, 
-                             error=f'生成报告时出现错误: {str(e)}',
-                             ai_config=ai_config if 'ai_config' in locals() else None)
-    finally:
-        db.close()
+    """兼容旧链接：重定向到智能分析页面"""
+    return redirect(url_for('quickform.smart_analyze', task_id=task_id))
 
 @quickform_bp.route('/api/report_status/<int:task_id>', methods=['GET'])
 @login_required
 def report_status(task_id):
-    """查询报告生成状态"""
-    db = SessionLocal()
-    try:
-        task = db.query(Task).filter_by(id=task_id, user_id=current_user.id).first()
-        if not task:
-            return jsonify({'error': '任务不存在'}), 404
-        
-        with progress_lock:
-            if task_id in analysis_progress:
-                progress = analysis_progress[task_id].copy()
-                
-                if progress.get('status') == 'completed':
-                    # 优先从内存中获取结果
-                    if task_id in analysis_results:
-                        progress['report'] = analysis_results[task_id]
-                        logger.info(f"从内存获取报告 - Task ID: {task_id}, 报告长度: {len(progress['report'])}")
-                    else:
-                        # 如果内存中没有，刷新数据库对象并获取
-                        db.refresh(task)
-                        if task.analysis_report:
-                            progress['report'] = task.analysis_report
-                            logger.info(f"从数据库获取报告 - Task ID: {task_id}, 报告长度: {len(task.analysis_report)}")
-                    
-                    # 确保有报告内容才返回completed状态
-                    if 'report' in progress and progress['report']:
-                        return jsonify(progress)
-                    else:
-                        # 如果状态是completed但没有报告，可能是保存失败，返回错误
-                        logger.warning(f"任务 {task_id} 状态为completed但无报告内容")
-                        return jsonify({
-                            'status': 'error',
-                            'message': '报告生成完成但未找到报告内容，请重试'
-                        })
-                
-                return jsonify(progress)
-            else:
-                # 检查数据库中是否有已完成的报告
-                db.refresh(task)  # 刷新对象以获取最新数据
-                if task.analysis_report:
-                    logger.info(f"从数据库获取已完成报告 - Task ID: {task_id}")
-                    return jsonify({
-                        'status': 'completed',
-                        'progress': 100,
-                        'message': '报告已生成',
-                        'report': task.analysis_report
-                    })
-                return jsonify({
-                    'status': 'not_started',
-                    'progress': 0,
-                    'message': '任务未开始'
-                })
-    except Exception as e:
-        logger.error(f"查询报告状态失败 - Task ID: {task_id}, 错误: {str(e)}")
-        return jsonify({'error': f'查询状态失败: {str(e)}'}), 500
-    finally:
-        db.close()
+    """已弃用：不再使用异步轮询，统一返回错误"""
+    return jsonify({'error': '异步查询已停用，请在智能分析页面直接生成并查看报告'}), 410
 
 @quickform_bp.route('/admin')
 @admin_required
