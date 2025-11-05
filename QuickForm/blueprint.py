@@ -925,7 +925,13 @@ def task_detail(task_id):
             return redirect(url_for('quickform.dashboard'))
         
         submission = db.query(Submission).filter_by(task_id=task.id).order_by(Submission.submitted_at.desc()).all()
-        return render_template('task_detail.html', task=task, submission=submission)
+        saved_filename = None
+        try:
+            if task.file_path:
+                saved_filename = os.path.basename(task.file_path)
+        except Exception:
+            saved_filename = None
+        return render_template('task_detail.html', task=task, submission=submission, saved_filename=saved_filename)
     finally:
         db.close()
 
@@ -969,7 +975,13 @@ def edit_task(task_id):
             flash('任务更新成功', 'success')
             return redirect(url_for('quickform.task_detail', task_id=task.id))
         
-        return render_template('edit_task.html', task=task)
+        saved_filename = None
+        try:
+            if task.file_path:
+                saved_filename = os.path.basename(task.file_path)
+        except Exception:
+            saved_filename = None
+        return render_template('edit_task.html', task=task, saved_filename=saved_filename)
     finally:
         db.close()
 

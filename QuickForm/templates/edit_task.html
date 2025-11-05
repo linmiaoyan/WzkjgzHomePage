@@ -25,7 +25,7 @@
                         <div class="alert alert-success mb-3">
                             <p class="mb-0">
                                 <strong>已上传文件：</strong>
-                                <a href="{{ url_for('quickform.uploaded_file', filename=task.file_path.split('/')[-1]) }}" target="_blank">
+                                <a href="{{ url_for('quickform.uploaded_file', filename=saved_filename) }}" target="_blank">
                                     {{ task.file_name }}
                                 </a>
                             </p>
