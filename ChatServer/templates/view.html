@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>教师端 - 设备监控与词云</title>
+    <link rel="stylesheet" href="{{ url_for('chat_server.static', filename='view_style.css') }}">
+    <!-- 本地引入 ECharts 5 主库 -->
+    <script src="{{ url_for('chat_server.static', filename='echarts.min.js') }}"></script>
+    <script src="{{ url_for('chat_server.static', filename='echarts-wordcloud.min.js') }}"></script>
+</head>
+<body>
+<div id="main-view-container">
+    <h2>当前已连接设备及提问情况</h2>
+    <table border="1" id="devices-table">
+        <thead>
+            <tr><th>IP</th><th>总提问数</th><th>最近问题</th></tr>
+        </thead>
+        <tbody>
+            <tr><td colspan="3">暂无数据</td></tr>
+        </tbody>
+    </table>
+    <button onclick="resetCSV()" style="margin:16px 0 8px 0;padding:6px 32px;font-size:1.1rem;">重置所有学生问答</button>
+    <hr/>
+    <h3>学生问题词云（自动更新）</h3>
+    <div id="wordcloud"></div>
+</div>
+<script>
+    function updateTable() {
+        fetch('/chat_server/api/view_data').then(r => r.json()).then(res => {
+            const tb = document.querySelector('#devices-table tbody');
+            tb.innerHTML = '';
+            (res.users || []).forEach(u => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `<td>${u.ip}</td><td>${u.count}</td><td>${u.last}</td>`;
+                tb.appendChild(tr);
+            });
+            if (!res.users || res.users.length === 0) {
+                tb.innerHTML = '<tr><td colspan="3">暂无数据</td></tr>';
+            }
+        });
+    }
+    setInterval(updateTable, 1000);
+    updateTable();
+    // 词云
+    let wordcloudChart=null;
+    function renderWordCloud(words){
+        if(!wordcloudChart){
+            wordcloudChart=echarts.init(document.getElementById('wordcloud'));
+        }
+        const counter={};
+        words.forEach(function(w){ w=w.trim(); if(w.length>0) counter[w]=1+(counter[w]||0); });
+        const wcData=Object.entries(counter).map(([name,value])=>({name,value}));
+        wordcloudChart.setOption({
+            tooltip:{show:true},
+            series:[{
+                type:'wordCloud',
+                gridSize:6,
+                sizeRange:[16,60],
+                rotationRange:[0,0],
+                shape: 'circle',
+                textStyle:{normal:{color:()=>`hsl(${360*Math.random()},60%,60%)`}},
+                data: wcData.length>0 ? wcData : [{name:'暂无内容',value:1}]
+            }]
+        });
+    }
+    function refreshWordCloud() {
+        fetch('/chat_server/api/wordcloud_data').then(r=>r.json()).then(res=>{
+            renderWordCloud(res.words||[]);
+        });
+    }
+    setInterval(refreshWordCloud, 1000); //每秒刷新
+    refreshWordCloud();
+    // CSV重置功能
+    function resetCSV() {
+        if(!confirm('确定要清空所有学生对话并恢复初始演示状态吗？')) return;
+        fetch('/chat_server/api/reset_csv', {method:'POST'}).then(r=>r.json()).then(res=>{
+            alert(res.msg||'重置成功');
+        }).then(()=>{updateTable();refreshWordCloud();});
+    }
+</script>
+</body>
+</html>

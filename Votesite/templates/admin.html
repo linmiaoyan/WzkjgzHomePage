@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>问卷管理</h2>
+    
+    <!-- 创建新问卷 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            创建新问卷
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('votesite.create_survey') }}" method="post">
+                <div class="mb-3">
+                    <label for="survey_name" class="form-label">问卷名称</label>
+                    <input type="text" class="form-control" id="survey_name" name="survey_name" required>
+                </div>
+                <div class="mb-3">
+                    <label for="survey_introduction" class="form-label">问卷简介 (非必填)</label>
+                    <textarea class="form-control" id="survey_introduction" name="survey_introduction" rows="3"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="subjective_question_prompt" class="form-label">主观题说明文字 (非必填)</label>
+                    <textarea class="form-control" id="subjective_question_prompt" name="subjective_question_prompt" rows="3"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">问卷类型</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="survey_type" id="single_choice" value="single_choice" checked>
+                        <label class="form-check-label" for="single_choice">
+                            单选题问卷
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="survey_type" id="table" value="table">
+                        <label class="form-check-label" for="table">
+                            表格问卷
+                        </label>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">创建问卷</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 现有问卷列表 -->
+    <div class="card">
+        <div class="card-header">
+            现有问卷
+        </div>
+        <div class="card-body">
+            {% if surveys %}
+            <div class="list-group">
+                {% for survey in surveys %}
+                <div class="list-group-item">
+                    <h5 class="mb-1">{{ survey.name }}</h5>
+                    <p class="mb-1">类型: {{ '单选题问卷' if survey.type == 'single_choice' else '表格问卷' }}</p>
+                    {% if survey.type == 'table' %}
+                    <p class="mb-1">选项数量: {{ survey.table_option_count }}，选项: {{ 'ABCDE'[:survey.table_option_count] }}</p>
+                    {% endif %}
+                    {% if survey.introduction %}
+                    <p class="mb-1">简介: {{ survey.introduction }}</p>
+                    {% endif %}
+                    {% if survey.subjective_question_prompt %}
+                    <p class="mb-1">主观题说明: {{ survey.subjective_question_prompt }}</p>
+                    {% endif %}
+                    <div class="btn-group mb-2">
+                        <a href="{{ url_for('votesite.create_single_choice_questions', survey_id=survey.id) if survey.type == 'single_choice' else url_for('votesite.create_table_questions', survey_id=survey.id) }}" 
+                           class="btn btn-sm btn-primary">管理问题</a>
+                        {% if survey.type == 'table' %}
+                        <a href="{{ url_for('votesite.manage_table_respondents', survey_id=survey.id) }}" 
+                           class="btn btn-sm btn-secondary">管理人名</a>
+                        {% endif %}
+                        <a href="{{ url_for('votesite.results', survey_id=survey.id) }}" class="btn btn-sm btn-info">查看结果</a>
+                        <form action="{{ url_for('votesite.delete_survey', survey_id=survey.id) }}" method="post" 
+                              onsubmit="return confirm('您确定要删除问卷 ' + '{{ survey.name }}' + ' 及其所有相关数据吗？此操作不可撤销！');" 
+                              style="display:inline;">
+                            <button type="submit" class="btn btn-sm btn-danger">删除</button>
+                        </form>
+                        <form action="{{ url_for('votesite.edit_survey_title', survey_id=survey.id) }}" method="post" style="display:inline;">
+                            <input type="text" name="new_title" value="{{ survey.name }}" style="width:120px;display:inline-block;" required>
+                            <button type="submit" class="btn btn-sm btn-warning">修改标题</button>
+                        </form>
+                    </div>
+                    <form action="{{ url_for('votesite.generate_qr', survey_id=survey.id) }}" method="post" class="mt-3">
+                        <div class="input-group mb-3">
+                            <label for="num_users{{ survey.id }}" class="input-group-text">需要生成的二维码数量</label>
+                            <input type="number" class="form-control" id="num_users{{ survey.id }}" 
+                                   name="num_users" min="1" value="10" required>
+                            <button type="submit" class="btn btn-success">生成二维码</button>
+                        </div>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted">暂无问卷</p>
+            {% endif %}
+        </div>
+    </div>
+    <form action="{{ url_for('votesite.restart_server') }}" method="post" class="mt-4">
+        <button type="submit" class="btn btn-danger">重启服务</button>
+    </form>
+</div>
+{% endblock %} 

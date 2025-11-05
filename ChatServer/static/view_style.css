@@ -1,0 +1,47 @@
+body {
+    background: #f1f7fc;
+    font-family: '微软雅黑', 'Arial', sans-serif;
+    color: #113369;
+    margin: 0;
+    padding: 0;
+}
+#main-view-container {
+    max-width: 900px;
+    margin: 35px auto 0 auto;
+    background: #fcfcff;
+    border-radius: 10px;
+    box-shadow: 0 6px 28px #dbe7ff99;
+    padding: 28px 32px 18px 32px;
+}
+h2, h3 { color: #164bbd; text-align: center; }
+#devices-table {
+    border-collapse: collapse;
+    min-width: 600px;
+    margin: 0 auto 20px auto;
+    font-size: 1.06rem;
+}
+#devices-table th, #devices-table td {
+    padding: 8px 16px;
+    border-radius: 4px;
+}
+#devices-table th {
+    background: #e1ecfe;
+    color: #17306f;
+}
+#devices-table td {
+    background: #f7fafd;
+    color: #1f325e;
+}
+#devices-table tr:nth-child(even){
+    background: #eef4ff;
+}
+#wordcloud {
+    width:650px;height:420px;
+    margin:16px auto 8px auto;
+    border-radius: 8px;
+    background: #fff; box-shadow: 0 1px 9px #f0f4ff60;
+    padding:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}

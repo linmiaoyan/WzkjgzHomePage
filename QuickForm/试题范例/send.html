@@ -1,0 +1,52 @@
+生成应用后，请通过POST请求将数据提交到以下URL：
+<pre>http://wzkjgz.site/quickform/api/submit/d5575de9-b9c5-427a-b936-9ea105f1f26f</pre>
+
+<strong>点击按钮发送POST请求示例：</strong><br>
+<button onclick="sendTestData()" style="padding:8px 18px;margin:10px 0 18px 0;font-size:16px;">点我发送测试数据</button>
+<div id="send-result" style="margin-top:8px;color:#165DFF;font-weight:bold;"></div>
+
+<script>
+function sendTestData() {
+    const url = 'http://wzkjgz.site/quickform/api/submit/04e58b24-0b1f-4eaf-932c-ed3683e7aa8e';
+    const data = {
+        "字段1": "值1",
+        "字段2": "值2"
+    };
+    document.getElementById('send-result').textContent = "提交中...";
+    fetch(url, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+    .then(async response => {
+        const responseText = await response.text();
+        let responseData;
+        try {
+            responseData = JSON.parse(responseText);
+        } catch (e) {
+            responseData = { raw: responseText };
+        }
+        
+        if (!response.ok) {
+            const errorMsg = responseData.error || responseData.message || `HTTP ${response.status}: ${response.statusText}`;
+            throw new Error(errorMsg);
+        }
+        return responseData;
+    })
+    .then(data => {
+        document.getElementById('send-result').textContent = "提交成功: " + JSON.stringify(data);
+        document.getElementById('send-result').style.color = '#28a745';
+        console.log('提交成功:', data);
+    })
+    .catch(error => {
+        document.getElementById('send-result').textContent = "提交失败: " + error.message;
+        document.getElementById('send-result').style.color = '#dc3545';
+        console.error('提交失败:', error);
+        console.error('请求URL:', url);
+        console.error('请求数据:', data);
+    });
+}
+</script>
+

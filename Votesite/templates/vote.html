@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block content %}
+<style>
+    /* 强制表格数据单元格内容不换行，以便在小屏幕上启用横向滚动 */
+    .table-responsive table td {
+        white-space: nowrap;
+    }
+    /* 允许表格标题自动换行 */
+    .table-responsive table th {
+        white-space: normal;
+    }
+    /* 确保按钮组内的按钮也保持在一行 */
+    .table-responsive .btn-group {
+        flex-wrap: nowrap;
+    }
+    /* 增加表格列间距 */
+    .table-responsive table td {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+    }
+    /* 增加表格标题列间距 */
+    .table-responsive table th {
+        padding-left: 1.5rem;
+        padding-right: 1.5rem;
+    }
+    /* 增加按钮组内按钮间距 */
+    .btn-group .btn {
+        margin: 0 0.25rem;
+    }
+    /* 隔行交替颜色 */
+    .table tbody tr:nth-child(odd) td {
+        background-color: #abceed !important; /* 浅蓝色 */
+    }
+    .table tbody tr:nth-child(even) td {
+        background-color: #ffffff !important; /* 白色 */
+    }
+    /* 确保表格列之间有框线 */
+    .table.table-bordered th,
+    .table.table-bordered td {
+        border: 2px solid #abb9c6 !important; /* 强制显示边框 */
+    }
+    /* 添加选项限制提示样式 */
+    .option-limit-info {
+        font-size: 0.9rem;
+        color: #666;
+        margin-top: 0.5rem;
+    }
+    .option-limit-warning {
+        color: #dc3545;
+        font-weight: bold;
+    }
+    /* 添加漏填提示样式 */
+    .missing-field-alert {
+        display: none;
+        color: #dc3545;
+        font-size: 0.9rem;
+        margin-top: 0.5rem;
+    }
+</style>
+<div class="container mt-4">
+    <h2>{{ survey.name }}</h2>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }} mt-3" role="alert">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    {% if survey.introduction %}
+    <div class="survey-intro" style="background:#f8f9fa;border-left:4px solid #17a2b8;padding:1em;margin-bottom:1em;">
+        <h4 style="margin-top:0;">问卷简介</h4>
+        <p class="mb-0">{{ survey.introduction }}</p>
+    </div>
+    {% endif %}
+
+
+    
+    <form action="{{ url_for('votesite.submit_vote', survey_id=survey.id) }}" method="post" id="voteForm">
+        {% if survey.type == 'single_choice' %}
+            <!-- 单选题问卷 -->
+            {% if survey.option_limits %}
+            <div class="alert alert-info mb-3">
+                <h5 class="alert-heading">选项限制说明</h5>
+                <p class="mb-0">
+                    {% for option, limit in survey.option_limits.items() %}
+                    选项 {{ option }} 最多选择 {{ limit }} 次<br>
+                    {% endfor %}
+                </p>
+            </div>
+            {% endif %}
+            
+            {% for question in questions %}
+            <div class="card mb-3 {% if loop.index is odd %}bg-info-subtle{% else %}bg-light{% endif %}">
+                <div class="card-body">
+                    <h5 class="card-title">{{ question.content }}</h5>
+                    <div class="btn-group" role="group">
+                        {% for option in 'ABCDE'[:question.option_count] %}
+                        <input type="radio" class="btn-check" name="question_{{ question.id }}" 
+                               id="q{{ question.id }}_{{ option }}" value="{{ option }}" required>
+                        <label class="btn btn-outline-primary" for="q{{ question.id }}_{{ option }}">{{ option }}</label>
+                        {% endfor %}
+                    </div>
+                    <div class="missing-field-alert" id="missing_{{ question.id }}">
+                        请选择此问题的答案
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            
+            <!-- 添加选项计数显示 -->
+            {% if survey.option_limits %}
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">选项限制（提交时系统会自动核对数量）</h5>
+                    <div id="optionCounts">
+                        {% for option in survey.option_limits.keys() %}
+                        <div class="option-limit-info">
+                            选项 {{ option }}: <span id="count_{{ option }}">0</span>
+                            / {{ survey.option_limits[option] }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+        {% elif survey.type == 'table' %}
+            <!-- 表格问卷 -->
+            <div class="table-responsive">
+                <table class="table table-bordered">
+                    <thead>
+                        <tr>
+                            <th> </th>
+                            {% for question in questions %}
+                            <th>{{ question.content }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for respondent in respondents %}
+                        <tr>
+                            <td>{{ respondent.name }}</td>
+                            {% for question in questions %}
+                            <td>
+                                <div class="btn-group" role="group">
+                                    {% for option in 'ABCDE'[:table_option_count] %}
+                                    <input type="radio" class="btn-check" 
+                                           name="vote_{{ question.id }}_{{ respondent.id }}" 
+                                           id="vote_{{ question.id }}_{{ respondent.id }}_{{ option }}" 
+                                           value="{{ option }}" required>
+                                    <label class="btn btn-outline-primary" 
+                                           for="vote_{{ question.id }}_{{ respondent.id }}_{{ option }}">{{ option }}</label>
+                                    {% endfor %}
+                                </div>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+        
+        {% if subjective_question_prompt %}
+        <div class="card mt-4 mb-3">
+            <div class="card-body">
+                <h5 class="card-title">{{ subjective_question_prompt }}</h5>
+                <div class="mb-3">
+                    <textarea class="form-control" id="subjective_answer" name="subjective_answer" rows="5" 
+                              placeholder="请在此处输入您的意见和建议..."></textarea>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="mt-4">
+            <button type="submit" class="btn btn-primary">提交</button>
+        </div>
+    </form>
+</div>
+
+{% if survey.type == 'single_choice' and survey.option_limits %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const optionLimits = {{ survey.option_limits|tojson|safe }};
+    const optionList = Object.keys(optionLimits);
+
+    function updateOptionCounts() {
+        const counts = {};
+        optionList.forEach(opt => counts[opt] = 0);
+        document.querySelectorAll('input[type="radio"]:checked').forEach(radio => {
+            const val = radio.value;
+            if (counts[val] !== undefined) counts[val]++;
+        });
+        optionList.forEach(opt => {
+            const countElem = document.getElementById(`count_${opt}`);
+            if (countElem) {
+                countElem.textContent = counts[opt];
+            }
+        });
+    }
+
+    // 绑定所有radio的change事件
+    document.querySelectorAll('input[type="radio"]').forEach(radio => {
+        radio.addEventListener('change', updateOptionCounts);
+    });
+
+    // 页面加载时初始化一次
+    updateOptionCounts();
+});
+</script>
+{% endif %}
+{% endblock %}

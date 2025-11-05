@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>学生提问 - 聊天界面</title>
+    <link rel="stylesheet" href="{{ url_for('chat_server.static', filename='chat_style.css') }}">
+    <script src="{{ url_for('chat_server.static', filename='socket.io.js') }}"></script>
+    <script src="{{ url_for('chat_server.static', filename='marked.min.js') }}"></script>
+</head>
+<body>
+<div id="main-chat-container">
+    <h2>AI问答</h2>
+    <div style="margin-bottom:12px;">
+        <button id="btn-high" style="background:#1da88e;color:#fff" onclick="selectModel('Qwen/Qwen2.5-Coder-7B-Instruct')">高速：Qwen2.5-Coder-7B</button>
+        <button id="btn-low"  style="background:#5382e1;color:#fff" onclick="selectModel('deepseek-ai/DeepSeek-V2.5')">低速：DeepSeek-V2.5-236B</button>
+        <span style="margin-left:1em;font-size:.98em;color:#039;" id="curr-model-show"></span>
+    </div>
+    <div id="chat-view"><div id="chat-stream"></div></div>
+    <textarea id="question" rows="2" cols="60" placeholder="请输入你的问题..."></textarea><br>
+    <button onclick="sendSocketAsk()">发送</button>
+    <button onclick="newTopic()">新话题</button>
+    <div style="margin-top:10px;font-weight:bold;">历史提问记录</div>
+    <div id="history">历史为空，请提问或点击新话题！</div>
+</div>
+<script>
+    const MODEL_HIGH = 'Qwen/Qwen2.5-Coder-7B-Instruct';
+    const MODEL_LOW  = 'deepseek-ai/DeepSeek-V2.5';
+    function selectModel(m) {
+        localStorage.setItem('lastModel', m);
+        renderModelLabel();
+    }
+    function renderModelLabel() {
+        const curr = localStorage.getItem('lastModel') || MODEL_HIGH;
+        document.getElementById('curr-model-show').textContent = '当前模型：' + (curr === MODEL_HIGH ? '高速' : '低速');
+    }
+    if(!localStorage.getItem('lastModel')) localStorage.setItem('lastModel', MODEL_HIGH);
+    renderModelLabel();
+
+    const socket = io();
+    function sendSocketAsk() {
+        let question = document.getElementById('question').value.trim();
+        if (!question) return;
+        document.getElementById('chat-stream').innerHTML = '<span style="color:#888;">AI思考中...</span>';
+        const model = localStorage.getItem('lastModel') || MODEL_HIGH;
+        socket.emit('ask', {message: question, model});
+        let hist = localStorage.getItem('qHistory');
+        hist = hist ? JSON.parse(hist) : [];
+        hist.push(question);
+        localStorage.setItem('qHistory', JSON.stringify(hist));
+        document.getElementById('question').value = '';
+        refreshHistory();
+        aiReplying = true;
+        aiBuf = '';
+    }
+    let aiReplying = false, aiBuf = '';
+    socket.on('bot_stream', function(data) {
+        let content = data.token;
+        if(content === '[END]') {
+            aiReplying = false;
+            return;
+        }
+        aiBuf += content;
+        document.getElementById('chat-stream').innerHTML = marked.parse(aiBuf);
+    });
+    function refreshHistory(){
+        let hist = localStorage.getItem('qHistory');
+        if (hist) {
+            hist = JSON.parse(hist);
+            document.getElementById('history').innerHTML = hist.map((q,i)=>(i+1+': '+q)).join('<br>');
+        } else {
+            document.getElementById('history').innerHTML = '历史为空，请提问或点击新话题！';
+        }
+    }
+    function newTopic() {
+        fetch('/chat_server/api/newtopic', { method: 'POST' })
+        .then(r=>r.json()).then(res=>{
+            alert(res.msg||'已开启新话题');
+            localStorage.setItem('qHistory','[]');
+            refreshHistory();
+            document.getElementById('chat-stream').innerHTML = '';
+        });
+    }
+    refreshHistory();
+</script>
+</body>
+</html>

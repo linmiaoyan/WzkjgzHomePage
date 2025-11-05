@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>管理表格问卷 - {{ survey.name }} - 管理人名</h2>
+    
+    <!-- 添加单个人名 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            添加单个人名
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('votesite.manage_table_respondents', survey_id=survey.id) }}" method="post">
+                <input type="hidden" name="action" value="add_single">
+                <div class="mb-3">
+                    <label for="name" class="form-label">人名</label>
+                    <input type="text" class="form-control" id="name" name="name" required>
+                </div>
+                <button type="submit" class="btn btn-primary">添加</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 导入人名列表 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            导入人名列表 (每行一个人名)
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('votesite.manage_table_respondents', survey_id=survey.id) }}" method="post">
+                <input type="hidden" name="action" value="import_list">
+                <div class="mb-3">
+                    <label for="name_list" class="form-label">人名列表</label>
+                    <textarea class="form-control" id="name_list" name="name_list" rows="10" 
+                              placeholder="每行输入一个人名，例如：\n叶丹\n刘海岚\n黄青青"></textarea>
+                </div>
+                <button type="submit" class="btn btn-success">导入</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 现有成员列表 -->
+    <div class="card">
+        <div class="card-header">
+            现有成员列表
+        </div>
+        <div class="card-body">
+            {% if respondents %}
+            <ul class="list-group">
+                {% for respondent in respondents %}
+                <li class="list-group-item">{{ respondent.name }}</li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-muted">暂无成员</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a href="{{ url_for('votesite.admin') }}" class="btn btn-secondary">返回问卷列表</a>
+        <a href="{{ url_for('votesite.create_table_questions', survey_id=survey.id) }}" class="btn btn-info">管理问题</a>
+    </div>
+</div>
+{% endblock %} 

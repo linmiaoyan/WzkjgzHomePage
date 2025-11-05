@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}温州科技高级中学 - AI助学平台{% endblock %}</title>
+    
+    <!-- Bootstrap CSS -->
+    {% block bootstrap_css %}
+    <link href="static/css/bootstrap.min.css" rel="stylesheet">
+    {% endblock %}
+    
+    <!-- 共享CSS -->
+    <link href="{{ url_for('static', filename='css/common.css') }}" rel="stylesheet">
+    
+    <!-- 页面特定CSS -->
+    {% block page_css %}{% endblock %}
+</head>
+<body>
+    <!-- 统一菜单栏 -->
+    {% block navbar %}
+    <nav class="top-navbar">
+        <div class="nav-container">
+            <a href="/" class="nav-link {% if request.endpoint == 'index' or request.path == '/' %}active{% endif %}">主页</a>
+            <a href="/quickform" class="nav-link {% if request.endpoint == 'quickform' or 'quickform' in request.path %}active{% endif %}">QuickForm</a>
+            <a href="{{ config.get('CHAT_SERVER_API_URL') if config.get('CHAT_SERVER_API_URL') else '/chat_server' }}" id="ai-chat-link" class="nav-link">免注册AI问答</a>
+            {% block extra_nav_items %}{% endblock %}
+        </div>
+    </nav>
+    {% endblock %}
+    
+    <!-- 主要内容区域 -->
+    {% block content %}{% endblock %}
+    
+    <!-- Footer -->
+    {% block footer %}
+    <footer>
+        <p>&copy; {{ year if year else '' }} 温州科技高级中学 - 教育技术处</p>
+    </footer>
+    {% endblock %}
+    
+    <!-- Bootstrap JS -->
+    {% block bootstrap_js %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% endblock %}
+    
+    <!-- 共享JS -->
+    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+    
+    <!-- 页面特定JS -->
+    {% block page_js %}{% endblock %}
+</body>
+</html>
+

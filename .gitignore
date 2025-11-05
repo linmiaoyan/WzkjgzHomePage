@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 日志文件
+*.log
+
+# 环境变量
+.env
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 上传文件
+uploads/
+QuickForm/uploads/
+Votesite/instance/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+
+# 文档（可选，根据需要调整）
+# *.md
+# *.txt
+
+# 批处理脚本（可选，如果不想同步）
+# *.bat
+
+# 配置文件（可选，如果服务器配置不同）
+# sync_config.bat
+

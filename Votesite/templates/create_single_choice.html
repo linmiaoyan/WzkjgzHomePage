@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>管理单选题问卷 - {{ survey.name }}</h2>
+
+    <!-- 设置选项限制 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            设置选项限制
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('votesite.set_option_limits', survey_id=survey.id) }}" method="post">
+                <div class="row">
+                    {% for option in 'ABCDE'[:2] %}
+                    <div class="col-md-4 mb-3">
+                        <label for="limit_{{ option }}" class="form-label">选项 {{ option }} 最大选择次数</label>
+                        <input type="number" class="form-control" id="limit_{{ option }}" 
+                               name="limit_{{ option }}" min="0" value="{{ (survey.option_limits or {}).get(option, '') }}"
+                               placeholder="不限制请留空">
+                    </div>
+                    {% endfor %}
+                </div>
+                <button type="submit" class="btn btn-primary">保存限制设置</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 批量添加问题 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            批量添加问题 (每行一个问题)
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('votesite.create_single_choice_questions', survey_id=survey.id) }}" method="post">
+                <input type="hidden" name="action" value="import_list">
+                <div class="mb-3">
+                    <label for="question_list" class="form-label">问题列表</label>
+                    <textarea class="form-control" id="question_list" name="question_list" rows="10" 
+                              placeholder="每行输入一个问题，例如：\n问题1\n问题2\n问题3"></textarea>
+                </div>
+                <div class="mb-3">
+                    <label for="option_count_batch" class="form-label">批量问题选项数量 (默认)</label>
+                    <select class="form-select" id="option_count_batch" name="option_count_batch">
+                        <option value="2">2个选项 (A/B)</option>
+                        <option value="3">3个选项 (A/B/C)</option>
+                        <option value="4" selected>4个选项 (A/B/C/D)</option>
+                        <option value="5">5个选项 (A/B/C/D/E)</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-success">批量添加</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 问题列表 -->
+    <div class="card">
+        <div class="card-header">
+            问题列表
+        </div>
+        <div class="card-body">
+            {% if questions %}
+            <div class="list-group">
+                {% for question in questions %}
+                <div class="list-group-item">
+                    <h5 class="mb-1">{{ question.content }}</h5>
+                    <p class="mb-1">选项数量: {{ question.option_count }}</p>
+                    <p class="mb-1">选项: {{ 'ABCDE'[:question.option_count] }}</p>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted">暂无问题</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="mt-4">
+        <a href="{{ url_for('votesite.admin') }}" class="btn btn-secondary">返回问卷列表</a>
+    </div>
+</div>
+{% endblock %} 

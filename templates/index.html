@@ -1,0 +1,85 @@
+{% extends 'base_common.html' %}
+
+{% block title %}温州科技高级中学 - AI助学主页{% endblock %}
+
+{% block page_css %}
+    <style>
+        .school-image {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin: 20px 0;
+        }
+        .security-section {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            background-color: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .security-section a {
+            display: inline-block;
+            background-color: #34a853;
+            color: white;
+            text-decoration: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            font-size: 18px;
+            transition: background-color 0.3s ease;
+        }
+        .security-section a:hover {
+            background-color: #2a8846;
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+    <div class="main-container">
+        <header>
+            <h1>温州科技高级中学 - AI助学主页</h1>
+            <p>欢迎使用我们的AI助学平台，提升学习效率</p>
+        </header>
+        
+        
+        <div class="ai-assistants">
+            <div class="assistant-card">
+                <h2>腾讯元宝</h2>
+                <p>专业类回答，默认较多分段</p>
+                <a href="https://yuanbao.tencent.com/" target="_blank">访问腾讯元宝</a>
+            </div>
+            
+            <div class="assistant-card">
+                <h2>豆包</h2>
+                <p>能力综合，能生图</p>
+                <a href="https://www.doubao.com/" target="_blank">访问豆包</a>
+            </div>
+            
+            <div class="assistant-card">
+                <h2>kimi</h2>
+                <p>上下文能力强，能记住文件中的内容</p>
+                <a href="https://kimi.moonshot.cn/" target="_blank">访问kimi</a>
+            </div>
+            
+            <div class="assistant-card">
+                <h2>Deepseek</h2>
+                <p>伟大，无需多言</p>
+                <a href="https://www.deepseek.com/" target="_blank">访问Deepseek</a>
+            </div>
+            
+            <div class="assistant-card">
+                <h2>智谱清言</h2>
+                <p>中文理解精准，整体表现出色</p>
+                <a href="https://chatglm.cn/" target="_blank">访问智谱清言</a>
+            </div>
+            
+            <div class="assistant-card">
+                <h2>文心一言</h2>
+                <p>开源，功能强大且综合</p>
+                <a href="https://yiyan.baidu.com/" target="_blank">访问文心一言</a>
+            </div>
+        </div>
+    </div>
+{% endblock %}

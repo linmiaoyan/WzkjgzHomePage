@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>今日安保码 - 温州科技高级中学</title>
+    <style>
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 40px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        h1 {
+            color: #1a73e8;
+            margin-bottom: 30px;
+        }
+        .security-code {
+            font-size: 36px;
+            font-weight: bold;
+            color: #d93025;
+            letter-spacing: 5px;
+            margin: 30px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 2px dashed #ddd;
+        }
+        .access-info {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .note {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-size: 14px;
+        }
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 30px;
+        }
+        button, .button {
+            background-color: #1a73e8;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        button:hover, .button:hover {
+            background-color: #1557b0;
+        }
+        .back-button {
+            background-color: #6c757d;
+        }
+        .back-button:hover {
+            background-color: #5a6268;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>今日安保码</h1>
+        
+        <div class="security-code">{{ security_code }}</div>
+        
+        <div class="access-info">
+            <p>获取时间：{{ access_time }}</p>
+        </div>
+        
+        <div class="note">
+            <p>注意：此安保码每日0点自动刷新，仅当天有效。</p>
+        </div>
+        
+        <div class="actions">
+            <button onclick="copyToClipboard()">复制安保码</button>
+            <a href="{{ url_for('index') }}" class="button back-button">返回主页</a>
+        </div>
+    </div>
+    
+    <script>
+        function copyToClipboard() {
+            const securityCode = document.querySelector('.security-code').textContent;
+            navigator.clipboard.writeText(securityCode).then(() => {
+                alert('安保码已复制到剪贴板');
+            }).catch(err => {
+                console.error('无法复制文本：', err);
+            });
+        }
+        
+        // 格式化时间显示
+        document.addEventListener('DOMContentLoaded', function() {
+            const timeElement = document.querySelector('.access-info p');
+            if (timeElement) {
+                const accessTime = timeElement.textContent.replace('获取时间：', '');
+                try {
+                    const date = new Date(accessTime);
+                    const formattedDate = date.toLocaleString('zh-CN', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                    timeElement.textContent = `获取时间：${formattedDate}`;
+                } catch (e) {
+                    // 如果时间格式化失败，保持原样
+                }
+            }
+        });
+    </script>
+</body>
+</html>
