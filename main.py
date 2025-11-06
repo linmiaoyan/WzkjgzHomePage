@@ -10,6 +10,19 @@ app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # 设置session密钥
 socketio = SocketIO(app, cors_allowed_origins="*")
 
+# 添加全局响应头处理器，确保所有响应都使用UTF-8编码
+@app.after_request
+def after_request(response):
+    # 确保所有响应都包含正确的字符集信息
+    if 'Content-Type' in response.headers:
+        content_type = response.headers['Content-Type']
+        if content_type.startswith('text/') or content_type.startswith('application/json'):
+            if 'charset' not in content_type:
+                response.headers['Content-Type'] = content_type + '; charset=utf-8'
+    else:
+        response.headers['Content-Type'] = 'text/html; charset=utf-8'
+    return response
+
 # 添加QuickForm路径到sys.path
 quickform_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'QuickForm')
 if quickform_path not in sys.path:
@@ -153,11 +166,11 @@ def votesite():
 # 新增anfang路由，直接提供安保码
 @app.route('/anfang')
 def anfang():
-    # 直接获取今日安保码并存入session，无需密码验证
-    today_code = get_today_security_code()
-    session['security_code'] = today_code
-    session['access_time'] = datetime.datetime.now().isoformat()
-    return render_template('show_security_code.html', security_code=today_code, access_time=session['access_time'])
+    # 首次部署随机生成安保码（32位）
+    key = secrets.token_urlsafe(32)
+    response = make_response(key)
+    response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+    return response
 
 
 

@@ -35,8 +35,8 @@
                             </div>
                         </div>
                         {% endif %}
-                        <input type="file" class="form-control" id="file" name="file" accept=".pdf,.html,.htm,.jpg,.zip">
-                        <div class="form-text">支持上传PDF、HTML、HTM、JPG和ZIP格式的文件，最大16MB</div>
+                        <input type="file" class="form-control" id="file" name="file" accept=".html">
+                        <div class="form-text">支持上传HTML格式的文件，该文件会在数据分析时一同传入模型，请确保文件内容清晰易读</div>
                     </div>
                     <div class="d-flex justify-content-between">
                         <a href="{{ url_for('quickform.task_detail', task_id=task.id) }}" class="btn btn-outline-secondary">取消</a>

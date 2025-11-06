@@ -136,7 +136,7 @@
                     <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center;">
                         <div class="spinner-border text-success" role="status" style="width: 3rem; height: 3rem;"></div>
                         <h5 class="mt-3" id="processingTitle">正在生成报告，请稍候...</h5>
-                        <p class="text-muted" id="processingTip">服务请求正常，网络连接正常</p>
+                        <p class="text-muted" id="processingTip">分析过程不会超过两分钟，完成后会自动跳转至报告页面</p>
                         <p class="mt-2">已等待 <span id="elapsedSeconds">0</span> 秒</p>
                     </div>
                 </div>
@@ -173,12 +173,14 @@
                     
                     <div class="card">
                         <div class="card-header bg-primary text-white">
-                            <h5 class="mb-0">重新生成报告</h5>
+                            <h5 class="mb-0">重新生成报告（可编辑提示词）</h5>
                         </div>
                         <div class="card-body">
-                            <p class="mb-3 text-muted">如果您想重新生成分析报告，请点击下面的按钮：</p>
+                            <p class="mb-3 text-muted">您可以直接修改下方提示词，点击按钮重新生成报告：</p>
                             <form id="promptForm" action="{{ url_for('quickform.smart_analyze', task_id=task.id) }}" method="POST" onsubmit="startProcessingOverlay()">
-                                <input type="hidden" name="custom_prompt" value="{{ preview_prompt }}">
+                                <div class="mb-3">
+                                    <textarea name="custom_prompt" class="form-control" rows="12" style="font-family: monospace; font-size: 14px;">{{ preview_prompt }}</textarea>
+                                </div>
                                 <div class="d-grid gap-2">
                                     <button type="submit" class="btn btn-primary btn-lg">
                                         🔄 重新生成报告

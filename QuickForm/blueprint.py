@@ -26,6 +26,7 @@ import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import logging
 from functools import wraps
+from bs4 import BeautifulSoup
 
 # 配置日志
 logging.basicConfig(
@@ -216,6 +217,47 @@ def read_file_content(file_path):
         logger.error(f"读取文件内容失败: {str(e)}")
         return f"无法读取文件内容: {str(e)}"
 
+def extract_useful_text_from_html(html_content):
+    """解析HTML，保留主要可读文本（去掉脚本/样式/导航），尽量按段落输出。"""
+    try:
+        soup = BeautifulSoup(html_content or '', 'lxml')
+        # 去除明显无用的标签
+        for tag in soup(['script', 'style', 'noscript', 'template']):
+            tag.decompose()
+        for tag in soup.find_all(True):
+            # 删除常见导航/页脚/广告区域（通过tag名粗略过滤）
+            if tag.name in ['header', 'footer', 'nav', 'aside']:
+                tag.decompose()
+        # 提取纯文本，保留换行以形成段落
+        raw_text = soup.get_text('\n', strip=True)
+        # 归一化空白与段落：
+        lines = [ln.strip() for ln in raw_text.split('\n')]
+        lines = [ln for ln in lines if ln]  # 去掉空行
+        # 过滤纯符号/过短噪声，但不过度删减
+        filtered = []
+        for ln in lines:
+            # 去掉只有标点或长度极短的行，但保留标题等短句
+            if len(ln) == 1 and not ln.isalnum():
+                continue
+            filtered.append(ln)
+        # 合并相邻重复行，避免模板重复
+        merged = []
+        prev = None
+        for ln in filtered:
+            if ln != prev:
+                merged.append(ln)
+            prev = ln
+        # 限制总长度，避免提示词过长
+        text = '\n'.join(merged)
+        if len(text) > 20000:
+            text = text[:20000]
+        return text
+    except Exception:
+        try:
+            return BeautifulSoup(html_content or '', 'lxml').get_text('\n', strip=True)
+        except Exception:
+            return ''
+
 def generate_analysis_prompt(task, submission=None, file_content=None):
     """根据任务信息生成分析提示词（优化版）"""
     if not submission:
@@ -357,6 +399,15 @@ def generate_analysis_prompt(task, submission=None, file_content=None):
 请以中文撰写报告，使用Markdown格式，包括适当的标题、列表和表格来增强可读性。
 """
     
+    # 如果存在附件且为HTML内容，追加“解析后的HTML”到提示词底部
+    try:
+        if file_content and ('<' in file_content and '>' in file_content):
+            parsed_html_text = extract_useful_text_from_html(file_content)
+            if parsed_html_text:
+                prompt += "\n\n【学生实际使用的HTML内容主要如下】\n"
+                prompt += parsed_html_text
+    except Exception:
+        pass
     return prompt
 
 def call_ai_model(prompt, ai_config):
@@ -370,7 +421,7 @@ def call_ai_model(prompt, ai_config):
         data = {
             "model": "deepseek-chat",
             "messages": [
-                {"role": "system", "content": "你是一个专业的数据分析助手。请基于用户提供的数据，生成一份详细、专业、有洞察力的分析报告。"},
+                {"role": "system", "content": "你面向的用户一般是教师和学生"},
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.7,
@@ -395,7 +446,7 @@ def call_ai_model(prompt, ai_config):
         data = {
             "model": "doubao-seed-1-6-251015",
             "messages": [
-                {"role": "system", "content": "你是一个专业的数据分析助手。请基于用户提供的数据，生成一份详细、专业、有洞察力的分析报告。"},
+                {"role": "system", "content": "你面向的用户一般是教师和学生"},
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.7,
@@ -421,7 +472,7 @@ def call_ai_model(prompt, ai_config):
             "model": "qwen-plus",
             "input": {
                 "messages": [
-                    {"role": "system", "content": "你是一个专业的数据分析助手。请基于用户提供的数据，生成一份详细、专业、有洞察力的分析报告。"},
+                    {"role": "system", "content": "你面向的用户一般是教师和学生"},
                     {"role": "user", "content": prompt}
                 ]
             },
@@ -472,41 +523,49 @@ def call_ai_model(prompt, ai_config):
             raise Exception(f"阿里云百炼API调用失败: {str(e)}")
     
     elif ai_config.selected_model == 'chat_server':
-        # 直接调用硅基流动 OpenAI 兼容接口，避免依赖本地 HTTP 转发
-        import os
-        try:
-            from openai import OpenAI
-        except Exception:
-            OpenAI = None
-        # 优先使用用户配置的token，其次使用应用配置的默认token，最后使用环境变量
-        api_key = ai_config.chat_server_api_token or ''
+        # 直接通过HTTP请求硅基流动 OpenAI 兼容接口（避免SDK依赖）
+        import os as _os
+        import requests as _requests
+        # Token 解析顺序：用户配置 > 环境变量 > 应用配置
+        api_key = (ai_config.chat_server_api_token or '').strip()
         if not api_key:
-            # 尝试从应用配置获取默认token（需要在请求上下文中）
+            api_key = (_os.environ.get('CHAT_SERVER_API_TOKEN', '') or '').strip()
+        if not api_key:
             try:
-                api_key = current_app.config.get('CHAT_SERVER_API_TOKEN', '') or ''
+                api_key = (current_app.config.get('CHAT_SERVER_API_TOKEN', '') or '').strip()
             except RuntimeError:
-                # 不在请求上下文中，无法访问current_app，跳过
-                pass
+                api_key = ''
         if not api_key:
-            # 最后尝试从环境变量获取
-            api_key = os.environ.get('CHAT_SERVER_API_TOKEN', '') or ''
-        api_key = api_key.strip()
-        if not OpenAI or not api_key:
             raise Exception('硅基流动未配置，请设置 CHAT_SERVER_API_TOKEN 或在配置页填写 Token')
-        client = OpenAI(base_url='https://api.siliconflow.cn/v1', api_key=api_key)
-        msgs = [
-            {"role": "system", "content": "你是一个专业的数据分析助手。请基于用户提供的数据输出报告。"},
-            {"role": "user", "content": prompt}
-        ]
+        url = 'https://api.siliconflow.cn/v1/chat/completions'
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {api_key}'
+        }
+        payload = {
+            'model': 'deepseek-ai/DeepSeek-V2.5',
+            'messages': [
+                {"role": "system", "content": "你面向的用户一般是教师和学生"},
+                {"role": "user", "content": prompt}
+            ]
+        }
         try:
-            result = client.chat.completions.create(
-                model='deepseek-ai/DeepSeek-V2.5',
-                messages=msgs
-            )
-            choice = result.choices[0]
-            if hasattr(choice, 'message') and getattr(choice.message, 'content', None):
-                return choice.message.content
-            return str(result)
+            resp = _requests.post(url, headers=headers, json=payload, timeout=(5, 120))
+            if resp.status_code != 200:
+                raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            data = resp.json()
+            # OpenAI兼容结构
+            if isinstance(data, dict) and 'choices' in data and data['choices']:
+                choice = data['choices'][0]
+                # message.content 或 text
+                msg = (choice.get('message') or {})
+                content = msg.get('content') or choice.get('text')
+                if content:
+                    return content
+            raise Exception(f"未知响应格式: {str(data)[:200]}")
+        except _requests.Timeout as e:
+            logger.error(f"硅基流动超时: {e}")
+            raise Exception(f"硅基流动超时: {e}")
         except Exception as e:
             logger.error(f"硅基流动调用失败: {str(e)}")
             raise Exception(f"硅基流动调用失败: {str(e)}")
@@ -1019,6 +1078,7 @@ def submit_form(task_id):
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Content-Type'] = 'text/plain; charset=utf-8'
         return response
         
     db = SessionLocal()
