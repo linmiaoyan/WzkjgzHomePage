@@ -208,6 +208,24 @@ def bad_request(error):
             return '', 400
     return 'Bad Request', 400
 
+@app.errorhandler(404)
+def not_found(error):
+    """处理404错误，避免后台线程中的静态文件请求错误"""
+    # 检查是否在请求上下文中
+    try:
+        if request and hasattr(request, 'path'):
+            path = request.path
+            # 如果是静态文件请求但文件不存在，静默处理
+            if path.startswith('/static/') or path.startswith('/favicon.ico'):
+                return '', 404
+            # 如果是其他404，记录但不影响后台任务
+            if not path.startswith('/quickform/api/'):  # API请求的404不记录
+                app.logger.debug(f'404 Not Found: {path}')
+    except RuntimeError:
+        # 在请求上下文外（如后台线程），静默处理
+        pass
+    return 'Not Found', 404
+
 @app.errorhandler(ConnectionResetError)
 def handle_connection_reset(error):
     """处理连接重置错误，静默记录"""
@@ -217,6 +235,21 @@ def handle_connection_reset(error):
 @app.errorhandler(Exception)
 def handle_exception(error):
     """全局异常处理"""
+    # 检查是否是404错误（NotFound）
+    from werkzeug.exceptions import NotFound
+    if isinstance(error, NotFound):
+        # 404错误已经在not_found处理器中处理，这里静默处理
+        try:
+            if request and hasattr(request, 'path'):
+                path = request.path
+                # 静态文件或favicon的404不记录为错误
+                if path.startswith('/static/') or path.startswith('/favicon.ico'):
+                    return '', 404
+        except RuntimeError:
+            # 在请求上下文外，静默处理
+            pass
+        return 'Not Found', 404
+    
     # 记录真正的错误
     app.logger.error(f'未处理的异常: {str(error)}', exc_info=True)
     return 'Internal Server Error', 500
