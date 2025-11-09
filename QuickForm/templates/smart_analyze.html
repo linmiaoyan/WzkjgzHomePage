@@ -7,10 +7,10 @@
     <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/bootstrap-icons.css') }}" rel="stylesheet">
     <!-- 引入marked.js用于markdown渲染 -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="{{ url_for('static', filename='js/marked.min.js') }}"></script>
     <!-- 引入highlight.js用于代码高亮 -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/highlightjs-github.min.css') }}">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script src="{{ url_for('static', filename='js/highlight.min.js') }}"></script>
     <style>
         body {
             background-color: #f8f9fa;
@@ -142,7 +142,7 @@
                 </div>
                 <div class="alert alert-warning d-flex justify-content-between align-items-center" role="alert">
                     <div>
-                        当前大模型：<strong>硅基流动</strong>（通过统一调用）。如需修改 API Token，请点击右侧按钮。
+                        默认使用<strong>硅基流动</strong>（调用大模型）。如需修改 API Token，请点击右侧按钮。
                     </div>
                     <a href="{{ url_for('quickform.profile') }}" class="btn btn-sm btn-outline-primary">修改API Token</a>
                 </div>
@@ -159,10 +159,20 @@
                     </div>
                     
                     <div class="card mb-4">
-                        <div class="card-header bg-secondary text-white">
+                        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">当前分析报告</h5>
+                            <a href="{{ url_for('quickform.download_report', task_id=task.id) }}" class="btn btn-light btn-sm">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-download" viewBox="0 0 16 16">
+                                    <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                    <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                                </svg>
+                                下载报告
+                            </a>
                         </div>
                         <div class="card-body">
+                            <div class="alert alert-info mb-3">
+                                <strong>💡 提示：</strong>如果您已经生成了HTML网页，请上传到任务中，以便AI进行更深入的分析。
+                            </div>
                             <div class="report-content">
                                 <div id="markdown-content" class="markdown-body"></div>
                                 <!-- 保留原始报告内容用于下载 -->
@@ -191,6 +201,9 @@
                         </div>
                     </div>
                     {% else %}
+                    <div class="alert alert-info mb-4">
+                        <strong>💡 提示：</strong>如果您已经生成了HTML网页，请先上传到任务中，稍作等待就能在提示词中看到分析结果。
+                    </div>
                     <div class="card">
                         <div class="card-header bg-primary text-white">
                             <h5 class="mb-0">提示词编辑</h5>

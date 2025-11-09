@@ -81,6 +81,7 @@ class User(UserMixin, Base):
     school = Column(String(200))
     phone = Column(String(20))
     role = Column(String(20), default='user')
+    task_limit = Column(Integer, default=3)  # 任务创建上限，-1表示无限制
     created_at = Column(DateTime, default=datetime.now)
     tasks = relationship('Task', back_populates='author')
     ai_config = relationship('AIConfig', back_populates='user', uselist=False)
@@ -88,6 +89,19 @@ class User(UserMixin, Base):
     def is_admin(self):
         """检查用户是否为管理员"""
         return self.role == 'admin'
+    
+    def can_create_task(self):
+        """检查用户是否可以创建新任务"""
+        if self.is_admin():
+            return True
+        if self.task_limit == -1:
+            return True
+        db = SessionLocal()
+        try:
+            task_count = db.query(Task).filter_by(user_id=self.id).count()
+            return task_count < self.task_limit
+        finally:
+            db.close()
 
 class Task(Base):
     __tablename__ = 'task'
@@ -104,6 +118,7 @@ class Task(Base):
     analysis_report = Column(Text)
     report_file_path = Column(String(500))
     report_generated_at = Column(DateTime)
+    html_analysis = Column(Text)  # 存储HTML文件的AI分析结果
 
 class Submission(Base):
     __tablename__ = 'submission'
@@ -140,11 +155,12 @@ Base.metadata.create_all(engine)
 
 # 数据库迁移函数
 def migrate_user_table():
-    """为现有User表添加school、phone和role字段"""
+    """为现有User表添加school、phone和role字段，为Task表添加html_analysis字段"""
     try:
         inspector = inspect(engine)
         columns = [col['name'] for col in inspector.get_columns('user')]
         ai_cfg_cols = [col['name'] for col in inspector.get_columns('ai_config')]
+        task_cols = [col['name'] for col in inspector.get_columns('task')] if 'task' in inspector.get_table_names() else []
         
         with engine.begin() as conn:
             if 'school' not in columns:
@@ -168,6 +184,14 @@ def migrate_user_table():
                     logger.info("成功添加role字段到user表")
                 except Exception as e:
                     logger.warning(f"添加role字段失败（可能已存在）: {str(e)}")
+            
+            if 'task_limit' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN task_limit INTEGER DEFAULT 3"))
+                    conn.execute(text("UPDATE user SET task_limit = 3 WHERE task_limit IS NULL"))
+                    logger.info("成功添加task_limit字段到user表")
+                except Exception as e:
+                    logger.warning(f"添加task_limit字段失败（可能已存在）: {str(e)}")
             # ai_config 新增 chat_server 字段
             if 'chat_server_api_url' not in ai_cfg_cols:
                 try:
@@ -181,6 +205,13 @@ def migrate_user_table():
                     logger.info("成功为ai_config添加chat_server_api_token")
                 except Exception as e:
                     logger.warning(f"添加chat_server_api_token失败（可能已存在）: {str(e)}")
+            # task 新增 html_analysis 字段
+            if task_cols and 'html_analysis' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN html_analysis TEXT"))
+                    logger.info("成功为task添加html_analysis字段")
+                except Exception as e:
+                    logger.warning(f"添加html_analysis失败（可能已存在）: {str(e)}")
     except Exception as e:
         logger.error(f"数据库迁移失败: {str(e)}")
 
@@ -257,6 +288,59 @@ def extract_useful_text_from_html(html_content):
             return BeautifulSoup(html_content or '', 'lxml').get_text('\n', strip=True)
         except Exception:
             return ''
+
+def analyze_html_file(task_id, user_id, file_path):
+    """在后台分析HTML文件，将分析结果存储到数据库"""
+    def analyze_in_background():
+        db = SessionLocal()
+        try:
+            task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
+            if not task:
+                logger.warning(f"任务 {task_id} 不存在，跳过HTML分析")
+                return
+            
+            # 读取HTML文件内容
+            html_content = read_file_content(file_path)
+            if not html_content or len(html_content) < 100:
+                logger.warning(f"HTML文件内容过短，跳过分析")
+                return
+            
+            # 获取用户的AI配置
+            ai_config = db.query(AIConfig).filter_by(user_id=user_id).first()
+            if not ai_config:
+                logger.warning(f"用户 {user_id} 未配置AI，跳过HTML分析")
+                return
+            
+            # 生成分析提示词
+            # 限制HTML内容长度，避免提示词过长
+            html_preview = html_content[:5000] if len(html_content) > 5000 else html_content
+            analysis_prompt = f"""分析以下HTML文件，提取关键信息，包括：
+1. 页面的主要功能和用途
+2. 包含的主要内容和结构
+3. 可能的数据收集点或交互元素
+
+HTML内容：
+{html_preview}
+
+请用简洁的中文总结，控制在500字以内。"""
+            
+            # 调用AI进行分析
+            try:
+                analysis_result = call_ai_model(analysis_prompt, ai_config)
+                # 保存分析结果到数据库
+                task.html_analysis = analysis_result
+                db.commit()
+                logger.info(f"任务 {task_id} 的HTML文件分析完成")
+            except Exception as e:
+                logger.error(f"分析HTML文件失败: {str(e)}")
+        except Exception as e:
+            logger.error(f"HTML分析后台任务失败: {str(e)}")
+        finally:
+            db.close()
+    
+    # 在后台线程中执行分析
+    t = threading.Thread(target=analyze_in_background, daemon=True)
+    t.start()
 
 def generate_analysis_prompt(task, submission=None, file_content=None):
     """根据任务信息生成分析提示词（优化版）"""
@@ -399,15 +483,11 @@ def generate_analysis_prompt(task, submission=None, file_content=None):
 请以中文撰写报告，使用Markdown格式，包括适当的标题、列表和表格来增强可读性。
 """
     
-    # 如果存在附件且为HTML内容，追加“解析后的HTML”到提示词底部
-    try:
-        if file_content and ('<' in file_content and '>' in file_content):
-            parsed_html_text = extract_useful_text_from_html(file_content)
-            if parsed_html_text:
-                prompt += "\n\n【学生实际使用的HTML内容主要如下】\n"
-                prompt += parsed_html_text
-    except Exception:
-        pass
+    # 如果任务有HTML分析结果，添加到提示词中
+    if task.html_analysis:
+        prompt += "\n\n【HTML文件分析结果】\n"
+        prompt += task.html_analysis
+    
     return prompt
 
 def call_ai_model(prompt, ai_config):
@@ -898,13 +978,14 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
+        remember = request.form.get('remember') == 'on'
         
         db = SessionLocal()
         try:
             user = db.query(User).filter_by(username=username).first()
             
             if user and bcrypt.check_password_hash(user.password, password):
-                login_user(user)
+                login_user(user, remember=remember)
                 next_page = request.args.get('next')
                 return redirect(next_page) if next_page else redirect(url_for('quickform.dashboard'))
             else:
@@ -939,9 +1020,10 @@ def create_task():
     db = SessionLocal()
     try:
         if not current_user.is_admin():
-            task_count = db.query(Task).filter_by(user_id=current_user.id).count()
-            if task_count >= 3:
-                flash(f'您已达到任务数量上限（3个）。如需创建更多任务，请联系管理员：wzlinmiaoyan@163.com', 'warning')
+            if not current_user.can_create_task():
+                task_limit = current_user.task_limit if current_user.task_limit != -1 else "无限制"
+                task_count = db.query(Task).filter_by(user_id=current_user.id).count()
+                flash(f'您已达到任务数量上限（{task_limit}个，当前{task_count}个）。如需创建更多任务，请联系管理员：wzlinmiaoyan@163.com', 'warning')
                 return redirect(url_for('quickform.dashboard'))
         
         if request.method == 'POST':
@@ -959,6 +1041,10 @@ def create_task():
             
             db.add(task)
             db.commit()
+            
+            # 如果是HTML文件，在任务保存后自动在后台分析
+            if task.file_path and task.file_path.lower().endswith(('.html', '.htm')):
+                analyze_html_file(task.id, current_user.id, task.file_path)
             
             flash('数据任务创建成功', 'success')
             return redirect(url_for('quickform.task_detail', task_id=task.id))
@@ -1023,11 +1109,16 @@ def edit_task(task_id):
                         os.remove(task.file_path)
                     task.file_name = file.filename
                     task.file_path = filepath
+                    # 如果是HTML文件，自动在后台分析
+                    if unique_filename.lower().endswith(('.html', '.htm')):
+                        task.html_analysis = None  # 清空旧的分析结果
+                        analyze_html_file(task.id, current_user.id, filepath)
             elif remove_file:
                 if task.file_path and os.path.exists(task.file_path):
                     os.remove(task.file_path)
                 task.file_name = None
                 task.file_path = None
+                task.html_analysis = None  # 清空分析结果
             
             db.commit()
             flash('任务更新成功', 'success')
@@ -1316,6 +1407,8 @@ def smart_analyze(task_id):
                 return render_template('smart_analyze.html', task=task, error=f'生成报告失败: {str(e)}', ai_config=ai_config, now=datetime.now())
         
         # GET 或 POST 完成后，准备页面所需数据
+        # 刷新task对象以获取最新的html_analysis
+        db.refresh(task)
         submission = db.query(Submission).filter_by(task_id=task_id).all()
         file_content = None
         if task.file_path and os.path.exists(task.file_path):
@@ -1335,7 +1428,16 @@ def smart_analyze(task_id):
 @quickform_bp.route('/download_report/<int:task_id>')
 @login_required
 def download_report(task_id):
-    """下载报告"""
+    """下载报告 - PDF格式"""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.enums import TA_LEFT, TA_CENTER
+    import re
+    
     db = SessionLocal()
     try:
         task = db.get(Task, task_id)
@@ -1346,48 +1448,123 @@ def download_report(task_id):
             flash('无权访问此任务', 'danger')
             return redirect(url_for('quickform.dashboard'))
         
-        if task.report_file_path and os.path.exists(task.report_file_path):
-            import re
-            safe_title = re.sub(r'[^a-zA-Z0-9_\u4e00-\u9fa5]', '_', task.title)
-            safe_filename = f"{safe_title}_分析报告.html"
+        # 获取报告内容
+        report_content = task.analysis_report or "暂无报告内容"
+        
+        # 创建PDF
+        safe_title = re.sub(r'[^a-zA-Z0-9_\u4e00-\u9fa5]', '_', task.title)
+        safe_filename = f"{safe_title}_分析报告.pdf"
+        
+        # 创建内存中的PDF
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        story = []
+        
+        # 设置样式
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            textColor='#1a73e8',
+            spaceAfter=30,
+            alignment=TA_CENTER
+        )
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor='#333333',
+            spaceAfter=12,
+            spaceBefore=12
+        )
+        normal_style = ParagraphStyle(
+            'CustomNormal',
+            parent=styles['Normal'],
+            fontSize=11,
+            textColor='#000000',
+            spaceAfter=6,
+            leading=16
+        )
+        
+        # 添加标题
+        story.append(Paragraph(f"数据分析报告", title_style))
+        story.append(Spacer(1, 0.2*inch))
+        story.append(Paragraph(f"<b>任务标题：</b>{task.title}", normal_style))
+        story.append(Paragraph(f"<b>创建时间：</b>{task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else '未知'}", normal_style))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # 将Markdown转换为纯文本并分段
+        # 简单的Markdown到文本转换
+        text_content = report_content
+        # 移除Markdown标记
+        text_content = re.sub(r'^#+\s+', '', text_content, flags=re.MULTILINE)
+        text_content = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text_content)
+        text_content = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text_content)
+        text_content = re.sub(r'`(.+?)`', r'<font face="Courier">\1</font>', text_content)
+        
+        # 按段落分割
+        paragraphs = text_content.split('\n\n')
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
             
-            try:
-                return send_file(
-                    task.report_file_path,
-                    as_attachment=True,
-                    download_name=safe_filename,
-                    mimetype='text/html; charset=utf-8'
-                )
-            except TypeError:
-                return send_file(
-                    task.report_file_path,
-                    as_attachment=True,
-                    attachment_filename=safe_filename,
-                    mimetype='text/html; charset=utf-8'
-                )
-        else:
-            import re
-            safe_title = re.sub(r'[^a-zA-Z0-9_\u4e00-\u9fa5]', '_', task.title)
-            safe_filename = f"{safe_title}_分析报告.html"
-            
-            html_content = render_template('download_report.html', task=task)
-            response = make_response(html_content.encode('utf-8'))
-            response.headers['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
-            response.headers['Content-Type'] = 'text/html; charset=utf-8'
-            
-            return response
+            # 检查是否是标题（以##开头）
+            if para.startswith('##'):
+                heading_text = para.replace('##', '').strip()
+                story.append(Paragraph(f"<b>{heading_text}</b>", heading_style))
+            elif para.startswith('#'):
+                heading_text = para.replace('#', '').strip()
+                story.append(Paragraph(f"<b>{heading_text}</b>", heading_style))
+            else:
+                # 处理列表
+                lines = para.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # 处理列表项
+                    if line.startswith('- ') or line.startswith('* '):
+                        line = line[2:].strip()
+                        story.append(Paragraph(f"• {line}", normal_style))
+                    elif re.match(r'^\d+\.\s+', line):
+                        line = re.sub(r'^\d+\.\s+', '', line)
+                        story.append(Paragraph(f"• {line}", normal_style))
+                    else:
+                        story.append(Paragraph(line, normal_style))
+                story.append(Spacer(1, 0.1*inch))
+        
+        # 构建PDF
+        doc.build(story)
+        buffer.seek(0)
+        
+        # 返回PDF文件
+        response = make_response(buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
+        return response
+        
     except Exception as e:
-        flash(f'下载报告时出错: {str(e)}', 'danger')
+        logger.error(f"生成PDF报告失败: {str(e)}")
+        flash(f'生成PDF报告时出错: {str(e)}', 'danger')
         return redirect(url_for('quickform.dashboard'))
     finally:
         db.close()
 
 @quickform_bp.route('/uploads/<path:filename>')
-@login_required
 def uploaded_file(filename):
-    """上传文件访问"""
+    """上传文件访问 - HTML文件允许无密码访问"""
     try:
-        return send_from_directory(UPLOAD_FOLDER, filename)
+        # 检查文件扩展名，如果是HTML文件则允许无密码访问
+        if filename.lower().endswith(('.html', '.htm')):
+            return send_from_directory(UPLOAD_FOLDER, filename)
+        else:
+            # 非HTML文件需要登录
+            if not current_user.is_authenticated:
+                flash('请先登录', 'warning')
+                return redirect(url_for('quickform.login'))
+            return send_from_directory(UPLOAD_FOLDER, filename)
     except FileNotFoundError:
         flash('文件不存在', 'danger')
         return redirect(request.referrer or url_for('quickform.dashboard'))
@@ -1502,6 +1679,85 @@ def admin_change_role(user_id):
         db.close()
     
     return redirect(url_for('quickform.admin_panel'))
+
+@quickform_bp.route('/admin/set_task_limit/<int:user_id>', methods=['POST'])
+@admin_required
+def admin_set_task_limit(user_id):
+    """设置用户任务创建上限为无限制"""
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if not user:
+            flash('用户不存在', 'danger')
+            return redirect(url_for('quickform.admin_panel'))
+        
+        if user.id == current_user.id:
+            flash('不能修改自己的任务上限', 'warning')
+            return redirect(url_for('quickform.admin_panel'))
+        
+        if user.role == 'admin':
+            flash('管理员用户无需设置任务上限', 'warning')
+            return redirect(url_for('quickform.admin_panel'))
+        
+        user.task_limit = -1  # -1表示无限制
+        db.commit()
+        flash(f'已将用户 {user.username} 的任务创建上限调整为无限制', 'success')
+    finally:
+        db.close()
+    
+    return redirect(url_for('quickform.admin_panel'))
+
+@quickform_bp.route('/task/<int:task_id>/delete_submission', methods=['DELETE'])
+@login_required
+def delete_submission(task_id):
+    """删除单条提交数据"""
+    db = SessionLocal()
+    try:
+        task = db.get(Task, task_id)
+        if not task or task.user_id != current_user.id:
+            return jsonify({'success': False, 'message': '无权访问此任务'}), 403
+        
+        submission_id = request.args.get('submission_id', type=int)
+        if not submission_id:
+            return jsonify({'success': False, 'message': '缺少提交ID'}), 400
+        
+        submission = db.query(Submission).filter_by(id=submission_id, task_id=task_id).first()
+        if not submission:
+            return jsonify({'success': False, 'message': '提交不存在'}), 404
+        
+        db.delete(submission)
+        db.commit()
+        return jsonify({'success': True, 'message': '删除成功'})
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除提交数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'删除失败: {str(e)}'}), 500
+    finally:
+        db.close()
+
+@quickform_bp.route('/task/<int:task_id>/delete_all_submissions', methods=['DELETE'])
+@login_required
+def delete_all_submissions(task_id):
+    """删除任务的所有提交数据"""
+    db = SessionLocal()
+    try:
+        task = db.get(Task, task_id)
+        if not task or task.user_id != current_user.id:
+            return jsonify({'success': False, 'message': '无权访问此任务'}), 403
+        
+        submissions = db.query(Submission).filter_by(task_id=task_id).all()
+        count = len(submissions)
+        for submission in submissions:
+            db.delete(submission)
+        
+        db.commit()
+        return jsonify({'success': True, 'message': f'成功删除 {count} 条数据'})
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除所有提交数据失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'删除失败: {str(e)}'}), 500
+    finally:
+        db.close()
 
 
 def init_quickform(app, login_manager_instance=None):

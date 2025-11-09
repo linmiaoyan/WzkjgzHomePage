@@ -81,7 +81,7 @@
                                         <th>学校</th>
                                         <th>手机号</th>
                                         <th>角色</th>
-                                        <th>任务数</th>
+                                        <th>任务数/上限</th>
                                         <th>注册时间</th>
                                         <th>操作</th>
                                     </tr>
@@ -99,16 +99,33 @@
                                                 {% if user.role == 'admin' %}管理员{% else %}普通用户{% endif %}
                                             </span>
                                         </td>
-                                        <td>{{ user.tasks|length }}</td>
+                                        <td>
+                                            {{ user.tasks|length }} / 
+                                            {% if user.task_limit == -1 %}
+                                                <span class="text-success">无限制</span>
+                                            {% else %}
+                                                {{ user.task_limit }}
+                                            {% endif %}
+                                        </td>
                                         <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                                         <td>
                                             {% if user.id != current_user.id %}
-                                            <form action="{{ url_for('quickform.admin_change_role', user_id=user.id) }}" method="POST" style="display:inline;">
-                                                <button type="submit" class="btn btn-sm {% if user.role == 'admin' %}btn-warning{% else %}btn-success{% endif %}" 
-                                                        onclick="return confirm('确定要{% if user.role == 'admin' %}取消管理员{% else %}设为管理员{% endif %}权限吗？')">
-                                                    {% if user.role == 'admin' %}取消管理员{% else %}设为管理员{% endif %}
-                                                </button>
-                                            </form>
+                                            <div class="btn-group" role="group">
+                                                <form action="{{ url_for('quickform.admin_change_role', user_id=user.id) }}" method="POST" style="display:inline;">
+                                                    <button type="submit" class="btn btn-sm {% if user.role == 'admin' %}btn-warning{% else %}btn-success{% endif %}" 
+                                                            onclick="return confirm('确定要{% if user.role == 'admin' %}取消管理员{% else %}设为管理员{% endif %}权限吗？')">
+                                                        {% if user.role == 'admin' %}取消管理员{% else %}设为管理员{% endif %}
+                                                    </button>
+                                                </form>
+                                                {% if user.role != 'admin' %}
+                                                <form action="{{ url_for('quickform.admin_set_task_limit', user_id=user.id) }}" method="POST" style="display:inline;">
+                                                    <button type="submit" class="btn btn-sm btn-info" 
+                                                            onclick="return confirm('确定要将该用户的任务创建上限调整为无限制吗？')">
+                                                        任务无限制
+                                                    </button>
+                                                </form>
+                                                {% endif %}
+                                            </div>
                                             {% else %}
                                             <span class="text-muted">当前用户</span>
                                             {% endif %}

@@ -53,7 +53,7 @@
                 
                 {% if task.file_name %}
                 <div class="mt-3">
-                    <strong>上传所用html文件，以便模型进一步分析：</strong>
+                    <strong>⚠可以上传学生使用html文件，以便模型更详细的分析，上传后可在互联网访问到该页面：</strong>
                     <a href="{{ url_for('quickform.uploaded_file', filename=saved_filename) }}" target="_blank" class="btn btn-outline-primary btn-sm">
                         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark" viewBox="0 0 16 16">
                             <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3-2A1.5 1.5 0 0 1 9.5 0H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5a1.5 1.5 0 0 1-1.5 1.5H11a1.5 1.5 0 0 1-1.5-1.5z"/>
@@ -152,8 +152,17 @@ function sendTestData() {
         
         <!-- 提交数据列表 -->
         <div class="card">
-            <div class="card-header">
+            <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">提交数据列表</h5>
+                {% if submission %}
+                <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllData()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-trash" viewBox="0 0 16 16">
+                        <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                        <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                    </svg>
+                    删除全部数据
+                </button>
+                {% endif %}
             </div>
             <div class="card-body">
                 {% if submission %}
@@ -172,15 +181,27 @@ function sendTestData() {
                                 <td>{{ sub.id }}</td>
                                 <td>{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                                 <td>
-                                    <button 
-                                        type="button" 
-                                        class="btn btn-link p-0"
-                                        data-sub-id="{{ sub.id }}"
-                                        data-sub-time="{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S') }}"
-                                        data-sub-data='{{ sub.data | tojson | safe }}'
-                                        onclick="openDataModal(this);">
-                                        查看数据
-                                    </button>
+                                    <div class="d-flex gap-2">
+                                        <button 
+                                            type="button" 
+                                            class="btn btn-link p-0"
+                                            data-sub-id="{{ sub.id }}"
+                                            data-sub-time="{{ sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S') }}"
+                                            data-sub-data='{{ sub.data | tojson | safe }}'
+                                            onclick="openDataModal(this);">
+                                            查看数据
+                                        </button>
+                                        <button 
+                                            type="button" 
+                                            class="btn btn-sm btn-danger"
+                                            onclick="deleteSingleData({{ sub.id }})">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-trash" viewBox="0 0 16 16">
+                                                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
+                                                <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
+                                            </svg>
+                                            删除
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -295,13 +316,59 @@ function sendTestData() {
         if (wrap) wrap.style.display = 'none';
     }
 
-    // 移除可能导致频闪的事件监听器
-    // document.addEventListener('click', function(event) {
-    //     // 检查点击的元素是否为模态框背景
-    //     if (event.target.classList.contains('modal') && event.target.style.display === 'block') {
-    //         event.target.style.display = 'none';
-    //     }
-    // });
+    // 删除单条数据
+    function deleteSingleData(subId) {
+        if (!confirm('确定要删除这条数据吗？此操作不可恢复。')) {
+            return;
+        }
+        
+        fetch(`{{ url_for('quickform.delete_submission', task_id=task.id) }}?submission_id=${subId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('删除成功');
+                location.reload();
+            } else {
+                alert('删除失败：' + (data.message || '未知错误'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('删除失败：' + error.message);
+        });
+    }
+    
+    // 删除全部数据
+    function deleteAllData() {
+        if (!confirm('确定要删除所有数据吗？此操作不可恢复。')) {
+            return;
+        }
+        
+        fetch(`{{ url_for('quickform.delete_all_submissions', task_id=task.id) }}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('删除成功');
+                location.reload();
+            } else {
+                alert('删除失败：' + (data.message || '未知错误'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('删除失败：' + error.message);
+        });
+    }
 </script>
 {% endblock %}
 {% endblock %}
