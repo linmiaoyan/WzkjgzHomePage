@@ -1,9 +1,11 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, make_response
 from flask_socketio import SocketIO
 import datetime
 import random
 import os
 import sys
+import secrets
+import logging
 from functools import lru_cache
 
 app = Flask(__name__)
@@ -172,7 +174,52 @@ def anfang():
     response.headers['Content-Type'] = 'text/plain; charset=utf-8'
     return response
 
+# 配置日志过滤器，过滤掉常见的扫描和攻击尝试
+class SecurityScanFilter(logging.Filter):
+    """过滤掉常见的端口扫描和安全扫描日志"""
+    def filter(self, record):
+        # 过滤掉常见的扫描请求
+        if hasattr(record, 'getMessage'):
+            msg = record.getMessage()
+            # 过滤RTSP协议请求
+            if 'RTSP/1.0' in msg or 'Bad request version' in msg:
+                return False
+            # 过滤无效HTTP请求
+            if 'Bad HTTP/0.9 request type' in msg:
+                return False
+            # 过滤TLS/SSL握手尝试（二进制数据）
+            if 'Bad request version' in msg and '\\x' in msg:
+                return False
+        return True
 
+# 配置Flask的日志，过滤掉扫描请求
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.addFilter(SecurityScanFilter())
+
+# 全局错误处理
+@app.errorhandler(400)
+def bad_request(error):
+    """处理400错误，静默处理扫描请求"""
+    # 检查是否是常见的扫描请求
+    if request and hasattr(request, 'environ'):
+        user_agent = request.environ.get('HTTP_USER_AGENT', '')
+        # 如果是明显的扫描工具，返回简单响应
+        if not user_agent or len(user_agent) < 5:
+            return '', 400
+    return 'Bad Request', 400
+
+@app.errorhandler(ConnectionResetError)
+def handle_connection_reset(error):
+    """处理连接重置错误，静默记录"""
+    # 连接重置通常是客户端断开，不需要记录为错误
+    return '', 200
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    """全局异常处理"""
+    # 记录真正的错误
+    app.logger.error(f'未处理的异常: {str(error)}', exc_info=True)
+    return 'Internal Server Error', 500
 
 if __name__ == '__main__':
     # 生产环境配置
