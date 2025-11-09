@@ -1,0 +1,438 @@
+"""报告生成服务"""
+import os
+import io
+import re
+import urllib.parse
+import threading
+import logging
+from datetime import datetime
+from functools import wraps
+from PIL import Image, ImageDraw, ImageFont
+
+logger = logging.getLogger(__name__)
+
+# 用于存储分析任务进度的字典
+analysis_progress = {}
+analysis_results = {}
+completed_reports = set()
+progress_lock = threading.Lock()
+
+
+def timeout(seconds, error_message="函数执行超时"):
+    """超时装饰器"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            result = [None]
+            exception = [None]
+            
+            def target():
+                try:
+                    result[0] = func(*args, **kwargs)
+                except Exception as e:
+                    exception[0] = e
+            
+            thread = threading.Thread(target=target)
+            thread.daemon = True
+            thread.start()
+            thread.join(seconds)
+            
+            if thread.is_alive():
+                raise TimeoutError(error_message)
+            elif exception[0]:
+                raise exception[0]
+            else:
+                return result[0]
+        
+        return wrapper
+    return decorator
+
+
+def save_analysis_report(task_id, report_content, SessionLocal, Task, upload_folder):
+    """保存分析报告到文件系统和数据库"""
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter_by(id=task_id).first()
+        if task:
+            if not report_content or not report_content.strip():
+                report_content = "<div class='alert alert-info' role='alert'><h4>报告内容为空</h4><p>本次分析未能生成有效内容。可能是由于以下原因：</p><ul><li>提交的数据量不足</li><li>数据质量问题</li><li>AI模型处理异常</li></ul><p>请尝试提交更多数据或修改提示词后重新分析。</p></div>"
+            
+            html_report = f"""
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分析报告 - {task.title}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            background-color: #f8f9fa;
+        }}
+        .container {{
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }}
+        .markdown-body {{
+            font-size: 16px;
+        }}
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 {{
+            color: #2c3e50;
+        }}
+        .markdown-body pre {{
+            background-color: #f6f8fa;
+            border-radius: 6px;
+        }}
+        .footer {{
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            color: #6c757d;
+            font-size: 0.9rem;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">数据分析报告</h1>
+        <p><strong>任务标题：</strong>{task.title}</p>
+        <p><strong>创建时间：</strong>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        
+        <div class="markdown-body">
+            {report_content}
+        </div>
+        
+        <div class="footer">
+            <p>由 QuickForm 智能分析功能生成</p>
+        </div>
+    </div>
+</body>
+</html>
+            """
+            
+            report_dir = os.path.join(upload_folder, 'reports')
+            if not os.path.exists(report_dir):
+                os.makedirs(report_dir)
+            
+            report_filename = f"report_{task_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+            report_path = os.path.join(report_dir, report_filename)
+            
+            with open(report_path, 'w', encoding='utf-8') as f:
+                f.write(html_report)
+            
+            task.analysis_report = report_content
+            task.report_file_path = report_path
+            task.report_generated_at = datetime.now()
+            db.commit()
+            
+            with progress_lock:
+                completed_reports.add(task_id)
+            
+            logger.info(f"任务 {task_id} 的分析报告已保存")
+    except Exception as e:
+        logger.error(f"保存分析报告失败: {str(e)}")
+    finally:
+        db.close()
+
+
+def generate_report_image(task, report_content):
+    """生成报告图片（PNG格式）"""
+    img_width = 1200
+    padding = 50
+    max_width = img_width - 2 * padding
+    
+    # 尝试加载字体（如果系统有中文字体）
+    try:
+        title_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 32)  # 微软雅黑
+        heading_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 24)
+        normal_font = ImageFont.truetype("C:/Windows/Fonts/msyh.ttc", 18)
+    except:
+        try:
+            title_font = ImageFont.truetype("C:/Windows/Fonts/simhei.ttf", 32)  # 黑体
+            heading_font = ImageFont.truetype("C:/Windows/Fonts/simhei.ttf", 24)
+            normal_font = ImageFont.truetype("C:/Windows/Fonts/simhei.ttf", 18)
+        except:
+            title_font = ImageFont.load_default()
+            heading_font = ImageFont.load_default()
+            normal_font = ImageFont.load_default()
+    
+    # 创建用于测量的画布
+    dummy_img = Image.new('RGB', (img_width, 1), color='white')
+    dummy_draw = ImageDraw.Draw(dummy_img)
+    
+    def measure(text, font):
+        try:
+            bbox = dummy_draw.textbbox((0, 0), text, font=font)
+            return bbox[2] - bbox[0], bbox[3] - bbox[1]
+        except AttributeError:
+            return dummy_draw.textsize(text, font=font)
+    
+    render_items = []
+    current_y = padding
+    
+    def add_text_line(text, font, fill='#000000', align='left', extra_spacing=10):
+        nonlocal current_y
+        if not text:
+            current_y += extra_spacing
+            return
+        width, height = measure(text, font)
+        render_items.append({
+            'text': text,
+            'font': font,
+            'fill': fill,
+            'align': align,
+            'y': current_y
+        })
+        current_y += height + extra_spacing
+    
+    def wrap_lines(text, font):
+        words = text.split()
+        if not words:
+            return []
+        lines = []
+        current_line = ""
+        for word in words:
+            candidate = (current_line + " " + word).strip()
+            width, _ = measure(candidate, font)
+            if width <= max_width:
+                current_line = candidate
+            else:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+        if current_line:
+            lines.append(current_line)
+        return lines
+    
+    # 标题
+    add_text_line("数据分析报告", title_font, fill='#1a73e8', align='center', extra_spacing=30)
+    
+    # 任务信息
+    info_lines = [
+        f"任务标题：{task.title}",
+        f"创建时间：{task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else '未知'}"
+    ]
+    for line in info_lines:
+        add_text_line(line, normal_font, extra_spacing=8)
+    current_y += 10
+    
+    # 处理报告内容 - 使用markdown渲染
+    try:
+        import markdown
+        from bs4 import BeautifulSoup
+        html_content = markdown.markdown(report_content, extensions=['extra', 'nl2br'])
+        soup = BeautifulSoup(html_content, 'html.parser')
+        text_content = soup.get_text('\n')
+    except:
+        text_content = report_content
+        text_content = re.sub(r'\*\*(.+?)\*\*', r'\1', text_content)
+        text_content = re.sub(r'\*(.+?)\*', r'\1', text_content)
+        text_content = re.sub(r'`(.+?)`', r'\1', text_content)
+    
+    paragraphs = text_content.split('\n\n')
+    
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            current_y += 15
+            continue
+        
+        if para.startswith('##'):
+            heading_text = para.replace('##', '').strip()
+            for line in wrap_lines(heading_text, heading_font):
+                add_text_line(line, heading_font, fill='#333333', extra_spacing=12)
+            current_y += 8
+        elif para.startswith('#'):
+            heading_text = para.replace('#', '').strip()
+            add_text_line(heading_text, heading_font, fill='#333333', extra_spacing=15)
+        else:
+            lines = para.split('\n')
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('- ') or line.startswith('* '):
+                    line = '• ' + line[2:].strip()
+                elif re.match(r'^\d+\.\s+', line):
+                    line = '• ' + re.sub(r'^\d+\.\s+', '', line)
+                
+                wrapped = wrap_lines(line, normal_font)
+                if not wrapped:
+                    wrapped = [line]
+                for text_line in wrapped:
+                    add_text_line(text_line, normal_font, extra_spacing=6)
+            current_y += 4
+    
+    img_height = max(current_y + padding, padding * 2)
+    img = Image.new('RGB', (img_width, img_height), color='white')
+    draw = ImageDraw.Draw(img)
+    
+    for item in render_items:
+        text = item['text']
+        font = item['font']
+        fill = item['fill']
+        y = item['y']
+        align = item['align']
+        width, _ = measure(text, font)
+        if align == 'center':
+            x = (img_width - width) // 2
+        else:
+            x = padding
+        draw.text((x, y), text, font=font, fill=fill)
+    
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG', optimize=True)
+    buffer.seek(0)
+    
+    safe_title = re.sub(r'[^a-zA-Z0-9_]', '_', task.title)
+    safe_filename = f"{safe_title}_report.png"
+    encoded_filename = urllib.parse.quote(safe_filename.encode('utf-8'))
+    
+    return buffer, encoded_filename
+
+
+def perform_analysis_with_custom_prompt(task_id, user_id, ai_config_id, custom_prompt, 
+                                         SessionLocal, Task, Submission, AIConfig,
+                                         read_file_content_func, call_ai_model_func, 
+                                         save_analysis_report_func):
+    """使用自定义提示词执行分析任务"""
+    import traceback
+    import logging
+    
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
+        if not task:
+            with progress_lock:
+                analysis_progress[task_id] = {
+                    'status': 'error',
+                    'message': '任务不存在'
+                }
+            return
+        
+        submission = db.query(Submission).filter_by(task_id=task_id).all()
+        
+        file_content = None
+        if task.file_path and os.path.exists(task.file_path):
+            file_content = read_file_content_func(task.file_path)
+        
+        ai_config = db.query(AIConfig).filter_by(id=ai_config_id).first()
+        if not ai_config:
+            with progress_lock:
+                analysis_progress[task_id] = {
+                    'status': 'error',
+                    'message': 'AI配置不存在'
+                }
+            return
+        
+        if ai_config.selected_model == 'deepseek' and not ai_config.deepseek_api_key:
+            with progress_lock:
+                analysis_progress[task_id] = {
+                    'status': 'error',
+                    'message': 'DeepSeek API密钥未配置'
+                }
+            logging.error(f"任务 {task_id}：DeepSeek API密钥未配置")
+            return
+        elif ai_config.selected_model == 'doubao' and not ai_config.doubao_api_key:
+            with progress_lock:
+                analysis_progress[task_id] = {
+                    'status': 'error',
+                    'message': '豆包API密钥未配置完整'
+                }
+            logging.error(f"任务 {task_id}：豆包API密钥未配置完整")
+            return
+        
+        logging.info(f"任务 {task_id}：使用模型 {ai_config.selected_model}")
+        
+        with progress_lock:
+            analysis_progress[task_id] = {
+                'status': 'in_progress',
+                'progress': 0,
+                'message': '正在生成提示词...'
+            }
+        
+        prompt = custom_prompt
+        
+        with progress_lock:
+            analysis_progress[task_id] = {
+                'status': 'in_progress',
+                'progress': 1,
+                'message': '大模型分析中，这可能需要几分钟时间...'
+            }
+        logging.info(f"任务 {task_id}：调用AI模型进行分析")
+        
+        # 调整各模型超时，避免后端刚返回而前端已判定超时的情况
+        timeout_seconds = 180 if ai_config.selected_model == 'chat_server' else (120 if ai_config.selected_model in ['deepseek', 'qwen'] else 90)
+        
+        @timeout(seconds=timeout_seconds, error_message=f"调用{ai_config.selected_model}模型超时（{timeout_seconds}秒）")
+        def call_ai_with_timeout(prompt, config):
+            logging.info(f"开始调用 {config.selected_model} API，提示词长度: {len(prompt)} 字符，超时设置: {timeout_seconds}秒")
+            return call_ai_model_func(prompt, config)
+        
+        try:
+            analysis_report = call_ai_with_timeout(prompt, ai_config)
+            logging.info(f"成功获取 {ai_config.selected_model} API 响应，报告长度: {len(analysis_report)} 字符")
+        except TimeoutError as timeout_error:
+            error_msg = str(timeout_error)
+            logging.error(f"任务 {task_id}：{error_msg}")
+            with progress_lock:
+                analysis_progress[task_id] = {
+                    'status': 'error',
+                    'message': f"分析超时：{error_msg}，请检查网络连接或稍后重试"
+                }
+            return
+        except Exception as api_error:
+            logging.error(f"任务 {task_id}：AI模型调用失败: {str(api_error)}")
+            logging.error(f"详细错误堆栈: {traceback.format_exc()}")
+            with progress_lock:
+                analysis_progress[task_id] = {
+                    'status': 'error',
+                    'message': f'API调用失败: {str(api_error)}'
+                }
+            return
+        
+        if analysis_report.startswith("错误：") or \
+           (analysis_report.startswith("DeepSeek API调用") and "失败" in analysis_report) or \
+           (analysis_report.startswith("豆包API调用") and "失败" in analysis_report):
+            logging.error(f"任务 {task_id}：AI模型返回错误: {analysis_report}")
+            raise Exception(analysis_report)
+        
+        with progress_lock:
+            # 先保存到内存，确保状态查询能立即获取
+            analysis_results[task_id] = analysis_report
+            analysis_progress[task_id] = {
+                'status': 'completed',
+                'progress': 100,
+                'message': '分析完成，请查看报告',
+                'report': analysis_report  # 直接包含在progress中，确保前端能获取
+            }
+            logger.info(f"任务 {task_id} 报告已保存到内存，长度: {len(analysis_report)} 字符")
+        
+        # 保存到数据库（在锁外执行，避免阻塞状态查询）
+        try:
+            # 获取upload_folder路径
+            quickform_dir = os.path.dirname(os.path.abspath(__file__))
+            upload_folder = os.path.join(quickform_dir, 'uploads')
+            save_analysis_report_func(task_id, analysis_report, SessionLocal, Task, upload_folder)
+            logger.info(f"任务 {task_id} 报告已保存到数据库")
+        except Exception as e:
+            logger.error(f"保存报告到数据库失败 - Task ID: {task_id}, 错误: {str(e)}")
+            # 即使数据库保存失败，内存中已有报告，不影响用户查看
+            
+    except Exception as e:
+        with progress_lock:
+            analysis_progress[task_id] = {
+                'status': 'error',
+                'message': f'分析过程中出错: {str(e)}'
+            }
+    finally:
+        db.close()
+

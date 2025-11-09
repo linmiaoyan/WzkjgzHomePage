@@ -1,10 +1,13 @@
-"""数据库模型定义"""
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+"""数据库模型定义和迁移"""
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from flask_login import UserMixin
 from datetime import datetime
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 Base = declarative_base()
 
@@ -18,13 +21,32 @@ class User(UserMixin, Base):
     school = Column(String(200))
     phone = Column(String(20))
     role = Column(String(20), default='user')
+    task_limit = Column(Integer, default=3)  # 任务创建上限，-1表示无限制
     created_at = Column(DateTime, default=datetime.now)
-    tasks = relationship('Task', back_populates='author')
+    tasks = relationship('Task', back_populates='author', foreign_keys='Task.user_id')
     ai_config = relationship('AIConfig', back_populates='user', uselist=False)
     
     def is_admin(self):
         """检查用户是否为管理员"""
         return self.role == 'admin'
+    
+    def can_create_task(self, SessionLocal, Task):
+        """检查用户是否可以创建新任务"""
+        db = SessionLocal()
+        try:
+            # 重新获取最新的用户数据，避免使用登录时旧的 task_limit
+            refreshed_user = db.get(User, self.id)
+            task_limit = refreshed_user.task_limit if refreshed_user else self.task_limit
+            
+            if self.is_admin():
+                return True
+            if task_limit == -1:
+                return True
+            
+            task_count = db.query(Task).filter_by(user_id=self.id).count()
+            return task_count < task_limit
+        finally:
+            db.close()
 
 
 class Task(Base):
@@ -34,7 +56,7 @@ class Task(Base):
     description = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
     user_id = Column(Integer, ForeignKey('user.id'))
-    author = relationship('User', back_populates='tasks')
+    author = relationship('User', back_populates='tasks', foreign_keys=[user_id])
     submission = relationship('Submission', back_populates='task', cascade='all, delete-orphan')
     file_name = Column(String(200))
     file_path = Column(String(500))
@@ -42,6 +64,11 @@ class Task(Base):
     analysis_report = Column(Text)
     report_file_path = Column(String(500))
     report_generated_at = Column(DateTime)
+    html_analysis = Column(Text)  # 存储HTML文件的AI分析结果
+    html_approved = Column(Integer, default=0)  # HTML审核状态：0=待审核，1=已通过，-1=已拒绝
+    html_approved_by = Column(Integer, ForeignKey('user.id'), nullable=True)  # 审核人ID
+    html_approved_at = Column(DateTime, nullable=True)  # 审核时间
+    approver = relationship('User', foreign_keys=[html_approved_by], backref='approved_tasks')
 
 
 class Submission(Base):
@@ -63,4 +90,90 @@ class AIConfig(Base):
     doubao_api_key = Column(String(200))
     doubao_secret_key = Column(String(200))
     qwen_api_key = Column(String(200))
+    # 硅基流动（ChatServer）配置
+    chat_server_api_url = Column(String(200))
+    chat_server_api_token = Column(String(200))
 
+
+def migrate_database(engine):
+    """数据库迁移函数"""
+    try:
+        inspector = inspect(engine)
+        columns = [col['name'] for col in inspector.get_columns('user')]
+        ai_cfg_cols = [col['name'] for col in inspector.get_columns('ai_config')] if 'ai_config' in inspector.get_table_names() else []
+        task_cols = [col['name'] for col in inspector.get_columns('task')] if 'task' in inspector.get_table_names() else []
+        
+        with engine.begin() as conn:
+            if 'school' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN school VARCHAR(200)"))
+                    logger.info("成功添加school字段到user表")
+                except Exception as e:
+                    logger.warning(f"添加school字段失败（可能已存在）: {str(e)}")
+            
+            if 'phone' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN phone VARCHAR(20)"))
+                    logger.info("成功添加phone字段到user表")
+                except Exception as e:
+                    logger.warning(f"添加phone字段失败（可能已存在）: {str(e)}")
+            
+            if 'role' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN role VARCHAR(20) DEFAULT 'user'"))
+                    conn.execute(text("UPDATE user SET role = 'user' WHERE role IS NULL"))
+                    logger.info("成功添加role字段到user表")
+                except Exception as e:
+                    logger.warning(f"添加role字段失败（可能已存在）: {str(e)}")
+            
+            if 'task_limit' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN task_limit INTEGER DEFAULT 3"))
+                    conn.execute(text("UPDATE user SET task_limit = 3 WHERE task_limit IS NULL"))
+                    logger.info("成功添加task_limit字段到user表")
+                except Exception as e:
+                    logger.warning(f"添加task_limit字段失败（可能已存在）: {str(e)}")
+            
+            # ai_config 新增 chat_server 字段
+            if ai_cfg_cols and 'chat_server_api_url' not in ai_cfg_cols:
+                try:
+                    conn.execute(text("ALTER TABLE ai_config ADD COLUMN chat_server_api_url VARCHAR(200)"))
+                    logger.info("成功为ai_config添加chat_server_api_url")
+                except Exception as e:
+                    logger.warning(f"添加chat_server_api_url失败（可能已存在）: {str(e)}")
+            if ai_cfg_cols and 'chat_server_api_token' not in ai_cfg_cols:
+                try:
+                    conn.execute(text("ALTER TABLE ai_config ADD COLUMN chat_server_api_token VARCHAR(200)"))
+                    logger.info("成功为ai_config添加chat_server_api_token")
+                except Exception as e:
+                    logger.warning(f"添加chat_server_api_token失败（可能已存在）: {str(e)}")
+            
+            # task 新增 html_analysis 字段
+            if task_cols and 'html_analysis' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN html_analysis TEXT"))
+                    logger.info("成功为task添加html_analysis字段")
+                except Exception as e:
+                    logger.warning(f"添加html_analysis失败（可能已存在）: {str(e)}")
+            
+            # task 新增审核相关字段
+            if task_cols and 'html_approved' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN html_approved INTEGER DEFAULT 0"))
+                    logger.info("成功为task添加html_approved字段")
+                except Exception as e:
+                    logger.warning(f"添加html_approved失败（可能已存在）: {str(e)}")
+            if task_cols and 'html_approved_by' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN html_approved_by INTEGER"))
+                    logger.info("成功为task添加html_approved_by字段")
+                except Exception as e:
+                    logger.warning(f"添加html_approved_by失败（可能已存在）: {str(e)}")
+            if task_cols and 'html_approved_at' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN html_approved_at DATETIME"))
+                    logger.info("成功为task添加html_approved_at字段")
+                except Exception as e:
+                    logger.warning(f"添加html_approved_at失败（可能已存在）: {str(e)}")
+    except Exception as e:
+        logger.error(f"数据库迁移失败: {str(e)}")

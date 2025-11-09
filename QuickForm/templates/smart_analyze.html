@@ -293,11 +293,9 @@
                           if (overlay){ overlay.style.display = 'none'; }
                           if (overlayTimerId){ clearInterval(overlayTimerId); overlayTimerId = null; }
                           clearInterval(pollId);
-                          var done = document.createElement('div');
-                          done.className = 'alert alert-success mt-3';
-                          done.innerText = '✅ 报告已生成并展示。';
-                          var target = document.querySelector('.card-body');
-                          if (target) { target.prepend(done); }
+                          // 成功后移除查询参数以避免页面刷新再次进入分析流程
+                          var cleanUrl = window.location.origin + window.location.pathname;
+                          window.location.replace(cleanUrl);
                       } else if (j.status === 'error'){
                           if (overlay){ overlay.style.display = 'none'; }
                           if (overlayTimerId){ clearInterval(overlayTimerId); overlayTimerId = null; }

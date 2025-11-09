@@ -256,5 +256,7 @@ def handle_exception(error):
 
 if __name__ == '__main__':
     # 生产环境配置
-    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    #debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'false'
+
     socketio.run(app, host='0.0.0.0', port=80, debug=debug_mode)

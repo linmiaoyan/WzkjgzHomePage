@@ -4,29 +4,30 @@ QuickForm Blueprint
 """
 import os
 import json
-import requests
 import threading
-import time
-import urllib.parse
-import traceback
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file, send_from_directory, current_app
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, inspect, text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
-import uuid
 from datetime import datetime
 import pandas as pd
 import io
-import base64
 import matplotlib
 matplotlib.use('Agg')  # 使用非交互式后端
 import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import logging
 from functools import wraps
-from bs4 import BeautifulSoup
+
+# 导入分离的模块
+from models import Base, User, Task, Submission, AIConfig, migrate_database
+from file_service import save_uploaded_file, read_file_content, ALLOWED_EXTENSIONS
+from ai_service import call_ai_model, generate_analysis_prompt, analyze_html_file
+from report_service import (
+    save_analysis_report, generate_report_image, perform_analysis_with_custom_prompt,
+    analysis_progress, analysis_results, completed_reports, progress_lock, timeout
+)
 
 # 配置日志
 logging.basicConfig(
@@ -59,88 +60,10 @@ DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
 # 初始化SQLAlchemy
 engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-# 用于存储分析任务进度的字典
-analysis_progress = {}
-analysis_results = {}
-completed_reports = set()
-progress_lock = threading.Lock()
 
 # 全局变量（将在init函数中设置）
 bcrypt = None
 login_manager = None
-
-# 数据库模型
-class User(UserMixin, Base):
-    __tablename__ = 'user'
-    id = Column(Integer, primary_key=True)
-    username = Column(String(50), unique=True, nullable=False)
-    email = Column(String(100), unique=True, nullable=False)
-    password = Column(String(200), nullable=False)
-    school = Column(String(200))
-    phone = Column(String(20))
-    role = Column(String(20), default='user')
-    task_limit = Column(Integer, default=3)  # 任务创建上限，-1表示无限制
-    created_at = Column(DateTime, default=datetime.now)
-    tasks = relationship('Task', back_populates='author')
-    ai_config = relationship('AIConfig', back_populates='user', uselist=False)
-    
-    def is_admin(self):
-        """检查用户是否为管理员"""
-        return self.role == 'admin'
-    
-    def can_create_task(self):
-        """检查用户是否可以创建新任务"""
-        if self.is_admin():
-            return True
-        if self.task_limit == -1:
-            return True
-        db = SessionLocal()
-        try:
-            task_count = db.query(Task).filter_by(user_id=self.id).count()
-            return task_count < self.task_limit
-        finally:
-            db.close()
-
-class Task(Base):
-    __tablename__ = 'task'
-    id = Column(Integer, primary_key=True)
-    title = Column(String(200), nullable=False)
-    description = Column(Text)
-    created_at = Column(DateTime, default=datetime.now)
-    user_id = Column(Integer, ForeignKey('user.id'))
-    author = relationship('User', back_populates='tasks')
-    submission = relationship('Submission', back_populates='task', cascade='all, delete-orphan')
-    file_name = Column(String(200))
-    file_path = Column(String(500))
-    task_id = Column(String(50), unique=True, default=lambda: str(uuid.uuid4()))
-    analysis_report = Column(Text)
-    report_file_path = Column(String(500))
-    report_generated_at = Column(DateTime)
-    html_analysis = Column(Text)  # 存储HTML文件的AI分析结果
-
-class Submission(Base):
-    __tablename__ = 'submission'
-    id = Column(Integer, primary_key=True)
-    task_id = Column(Integer, ForeignKey('task.id'))
-    task = relationship('Task', back_populates='submission')
-    data = Column(Text, nullable=False)
-    submitted_at = Column(DateTime, default=datetime.now)
-
-class AIConfig(Base):
-    __tablename__ = 'ai_config'
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('user.id'), unique=True)
-    user = relationship('User', back_populates='ai_config')
-    selected_model = Column(String(50), default='deepseek')
-    deepseek_api_key = Column(String(200))
-    doubao_api_key = Column(String(200))
-    doubao_secret_key = Column(String(200))
-    qwen_api_key = Column(String(200))
-    # 硅基流动（ChatServer）配置
-    chat_server_api_url = Column(String(200))
-    chat_server_api_token = Column(String(200))
 
 # 创建Blueprint
 quickform_bp = Blueprint(
@@ -152,760 +75,6 @@ quickform_bp = Blueprint(
 
 # 创建数据库表
 Base.metadata.create_all(engine)
-
-# 数据库迁移函数
-def migrate_user_table():
-    """为现有User表添加school、phone和role字段，为Task表添加html_analysis字段"""
-    try:
-        inspector = inspect(engine)
-        columns = [col['name'] for col in inspector.get_columns('user')]
-        ai_cfg_cols = [col['name'] for col in inspector.get_columns('ai_config')]
-        task_cols = [col['name'] for col in inspector.get_columns('task')] if 'task' in inspector.get_table_names() else []
-        
-        with engine.begin() as conn:
-            if 'school' not in columns:
-                try:
-                    conn.execute(text("ALTER TABLE user ADD COLUMN school VARCHAR(200)"))
-                    logger.info("成功添加school字段到user表")
-                except Exception as e:
-                    logger.warning(f"添加school字段失败（可能已存在）: {str(e)}")
-            
-            if 'phone' not in columns:
-                try:
-                    conn.execute(text("ALTER TABLE user ADD COLUMN phone VARCHAR(20)"))
-                    logger.info("成功添加phone字段到user表")
-                except Exception as e:
-                    logger.warning(f"添加phone字段失败（可能已存在）: {str(e)}")
-            
-            if 'role' not in columns:
-                try:
-                    conn.execute(text("ALTER TABLE user ADD COLUMN role VARCHAR(20) DEFAULT 'user'"))
-                    conn.execute(text("UPDATE user SET role = 'user' WHERE role IS NULL"))
-                    logger.info("成功添加role字段到user表")
-                except Exception as e:
-                    logger.warning(f"添加role字段失败（可能已存在）: {str(e)}")
-            
-            if 'task_limit' not in columns:
-                try:
-                    conn.execute(text("ALTER TABLE user ADD COLUMN task_limit INTEGER DEFAULT 3"))
-                    conn.execute(text("UPDATE user SET task_limit = 3 WHERE task_limit IS NULL"))
-                    logger.info("成功添加task_limit字段到user表")
-                except Exception as e:
-                    logger.warning(f"添加task_limit字段失败（可能已存在）: {str(e)}")
-            # ai_config 新增 chat_server 字段
-            if 'chat_server_api_url' not in ai_cfg_cols:
-                try:
-                    conn.execute(text("ALTER TABLE ai_config ADD COLUMN chat_server_api_url VARCHAR(200)"))
-                    logger.info("成功为ai_config添加chat_server_api_url")
-                except Exception as e:
-                    logger.warning(f"添加chat_server_api_url失败（可能已存在）: {str(e)}")
-            if 'chat_server_api_token' not in ai_cfg_cols:
-                try:
-                    conn.execute(text("ALTER TABLE ai_config ADD COLUMN chat_server_api_token VARCHAR(200)"))
-                    logger.info("成功为ai_config添加chat_server_api_token")
-                except Exception as e:
-                    logger.warning(f"添加chat_server_api_token失败（可能已存在）: {str(e)}")
-            # task 新增 html_analysis 字段
-            if task_cols and 'html_analysis' not in task_cols:
-                try:
-                    conn.execute(text("ALTER TABLE task ADD COLUMN html_analysis TEXT"))
-                    logger.info("成功为task添加html_analysis字段")
-                except Exception as e:
-                    logger.warning(f"添加html_analysis失败（可能已存在）: {str(e)}")
-    except Exception as e:
-        logger.error(f"数据库迁移失败: {str(e)}")
-
-# 工具函数
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def save_uploaded_file(file):
-    """保存上传的文件"""
-    try:
-        if file and allowed_file(file.filename):
-            unique_filename = str(uuid.uuid4()) + '_' + file.filename
-            filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
-            file.save(filepath)
-            return unique_filename, filepath
-    except Exception as e:
-        logger.error(f"保存文件失败: {str(e)}")
-    return None, None
-
-def read_file_content(file_path):
-    """读取文件内容"""
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
-    except UnicodeDecodeError:
-        try:
-            with open(file_path, 'rb') as f:
-                content = f.read()
-                return f"二进制文件 (大小: {len(content)} 字节)"
-        except Exception as e:
-            logger.error(f"读取文件内容失败: {str(e)}")
-            return f"无法读取文件内容: {str(e)}"
-    except Exception as e:
-        logger.error(f"读取文件内容失败: {str(e)}")
-        return f"无法读取文件内容: {str(e)}"
-
-def extract_useful_text_from_html(html_content):
-    """解析HTML，保留主要可读文本（去掉脚本/样式/导航），尽量按段落输出。"""
-    try:
-        soup = BeautifulSoup(html_content or '', 'lxml')
-        # 去除明显无用的标签
-        for tag in soup(['script', 'style', 'noscript', 'template']):
-            tag.decompose()
-        for tag in soup.find_all(True):
-            # 删除常见导航/页脚/广告区域（通过tag名粗略过滤）
-            if tag.name in ['header', 'footer', 'nav', 'aside']:
-                tag.decompose()
-        # 提取纯文本，保留换行以形成段落
-        raw_text = soup.get_text('\n', strip=True)
-        # 归一化空白与段落：
-        lines = [ln.strip() for ln in raw_text.split('\n')]
-        lines = [ln for ln in lines if ln]  # 去掉空行
-        # 过滤纯符号/过短噪声，但不过度删减
-        filtered = []
-        for ln in lines:
-            # 去掉只有标点或长度极短的行，但保留标题等短句
-            if len(ln) == 1 and not ln.isalnum():
-                continue
-            filtered.append(ln)
-        # 合并相邻重复行，避免模板重复
-        merged = []
-        prev = None
-        for ln in filtered:
-            if ln != prev:
-                merged.append(ln)
-            prev = ln
-        # 限制总长度，避免提示词过长
-        text = '\n'.join(merged)
-        if len(text) > 20000:
-            text = text[:20000]
-        return text
-    except Exception:
-        try:
-            return BeautifulSoup(html_content or '', 'lxml').get_text('\n', strip=True)
-        except Exception:
-            return ''
-
-def analyze_html_file(task_id, user_id, file_path):
-    """在后台分析HTML文件，将分析结果存储到数据库"""
-    def analyze_in_background():
-        db = SessionLocal()
-        try:
-            task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
-            if not task:
-                logger.warning(f"任务 {task_id} 不存在，跳过HTML分析")
-                return
-            
-            # 读取HTML文件内容
-            html_content = read_file_content(file_path)
-            if not html_content or len(html_content) < 100:
-                logger.warning(f"HTML文件内容过短，跳过分析")
-                return
-            
-            # 获取用户的AI配置
-            ai_config = db.query(AIConfig).filter_by(user_id=user_id).first()
-            if not ai_config:
-                logger.warning(f"用户 {user_id} 未配置AI，跳过HTML分析")
-                return
-            
-            # 生成分析提示词
-            # 限制HTML内容长度，避免提示词过长
-            html_preview = html_content[:5000] if len(html_content) > 5000 else html_content
-            analysis_prompt = f"""分析以下HTML文件，提取关键信息，包括：
-1. 页面的主要功能和用途
-2. 包含的主要内容和结构
-3. 可能的数据收集点或交互元素
-
-HTML内容：
-{html_preview}
-
-请用简洁的中文总结，控制在500字以内。"""
-            
-            # 调用AI进行分析
-            try:
-                analysis_result = call_ai_model(analysis_prompt, ai_config)
-                # 保存分析结果到数据库
-                task.html_analysis = analysis_result
-                db.commit()
-                logger.info(f"任务 {task_id} 的HTML文件分析完成")
-            except Exception as e:
-                logger.error(f"分析HTML文件失败: {str(e)}")
-        except Exception as e:
-            logger.error(f"HTML分析后台任务失败: {str(e)}")
-        finally:
-            db.close()
-    
-    # 在后台线程中执行分析
-    t = threading.Thread(target=analyze_in_background, daemon=True)
-    t.start()
-
-def generate_analysis_prompt(task, submission=None, file_content=None):
-    """根据任务信息生成分析提示词（优化版）"""
-    if not submission:
-        db = SessionLocal()
-        try:
-            submission = db.query(Submission).filter_by(task_id=task.id).all()
-        finally:
-            db.close()
-    
-    prompt = f"""你是一个数据分析专家，请基于以下表单数据提供详细的分析报告：
-
-任务标题：{task.title}
-任务描述：{task.description or '无'}
-
-提交数据信息：
-"""
-    
-    if submission:
-        total_count = len(submission)
-        prompt += f"总提交数量：{total_count} 条\n\n"
-        
-        # 解析所有数据
-        all_data = []
-        field_types = {}  # 字段类型统计
-        field_values = {}  # 字段值统计
-        
-        for sub in submission:
-            try:
-                data = json.loads(sub.data)
-                all_data.append(data)
-                
-                # 统计字段类型和值
-                for key, value in data.items():
-                    if key not in field_types:
-                        field_types[key] = []
-                        field_values[key] = []
-                    
-                    # 判断字段类型
-                    if isinstance(value, (int, float)):
-                        field_types[key].append('numeric')
-                        field_values[key].append(value)
-                    elif isinstance(value, bool):
-                        field_types[key].append('boolean')
-                        field_values[key].append(value)
-                    else:
-                        field_types[key].append('text')
-                        field_values[key].append(str(value))
-            except:
-                pass
-        
-        # 添加字段统计信息
-        if all_data and len(all_data) > 0:
-            prompt += "数据字段统计：\n"
-            for field in all_data[0].keys():
-                field_type_list = field_types.get(field, [])
-                if not field_type_list:
-                    continue
-                
-                # 判断主要类型
-                is_numeric = field_type_list.count('numeric') > len(field_type_list) * 0.8
-                is_boolean = field_type_list.count('boolean') > len(field_type_list) * 0.8
-                
-                prompt += f"  - {field}: "
-                if is_numeric:
-                    values = [v for v in field_values[field] if isinstance(v, (int, float))]
-                    if values:
-                        prompt += f"数值型，范围: {min(values)} - {max(values)}，平均值: {sum(values)/len(values):.2f}\n"
-                    else:
-                        prompt += "数值型\n"
-                elif is_boolean:
-                    values = field_values[field]
-                    true_count = sum(1 for v in values if v is True or str(v).lower() in ['true', '1', 'yes', '是'])
-                    prompt += f"布尔型，是: {true_count}，否: {len(values)-true_count}\n"
-                else:
-                    # 文本型，统计常见值
-                    values = field_values[field]
-                    from collections import Counter
-                    value_counts = Counter(values)
-                    top_values = value_counts.most_common(5)
-                    if len(top_values) > 0:
-                        prompt += f"文本型，常见值: {', '.join([f'{k}({v}次)' for k, v in top_values[:3]])}\n"
-                    else:
-                        prompt += "文本型\n"
-            
-            prompt += "\n"
-        
-        # 智能采样：根据数据量决定显示多少条
-        sample_size = min(20, total_count)  # 最多显示20条
-        if total_count > 3:
-            # 如果有大量数据，均匀采样（首、中、尾）
-            if total_count <= sample_size:
-                sample_indices = list(range(total_count))
-            else:
-                # 均匀采样：取前几条、中间几条、后几条
-                sample_indices = list(range(0, min(5, total_count)))  # 前5条
-                if total_count > 10:
-                    mid_start = total_count // 2 - 3
-                    mid_end = total_count // 2 + 3
-                    sample_indices.extend(range(mid_start, mid_end))
-                sample_indices.extend(range(max(0, total_count - 5), total_count))  # 后5条
-                sample_indices = sorted(list(set(sample_indices)))[:sample_size]
-            
-            prompt += f"数据样例（共显示 {len(sample_indices)} 条，占总数的 {len(sample_indices)/total_count*100:.1f}%）：\n"
-            for idx, i in enumerate(sample_indices, 1):
-                try:
-                    data = all_data[i]
-                    prompt += f"\n样例 #{idx} (第 {i+1} 条记录):\n"
-                    for key, value in data.items():
-                        # 限制单个值长度，避免过长
-                        value_str = str(value)
-                        if len(value_str) > 100:
-                            value_str = value_str[:100] + "...[截断]"
-                        prompt += f"  - {key}: {value_str}\n"
-                except:
-                    if i < len(submission):
-                        prompt += f"\n样例 #{idx}: {submission[i].data[:100]}...\n"
-        else:
-            # 数据量少，全部显示
-            prompt += "完整数据：\n"
-            for i, data in enumerate(all_data, 1):
-                prompt += f"\n提交 #{i}:\n"
-                for key, value in data.items():
-                    value_str = str(value)
-                    if len(value_str) > 100:
-                        value_str = value_str[:100] + "...[截断]"
-                    prompt += f"  - {key}: {value_str}\n"
-    else:
-        prompt += "暂无提交数据\n"
-    
-
-    prompt += """
-
-请提供一个全面的数据分析报告，包括但不限于：
-1. 数据概览：总提交量、关键数据分布、字段类型统计
-2. 主要发现：数据中的趋势、模式、异常和相关性
-3. 深入分析：基于数据的详细洞察，包括分布特征、集中趋势、离散程度等
-4. 建议和结论：基于分析结果的实用建议和改进方向
-
-请以中文撰写报告，使用Markdown格式，包括适当的标题、列表和表格来增强可读性。
-"""
-    
-    # 如果任务有HTML分析结果，添加到提示词中
-    if task.html_analysis:
-        prompt += "\n\n【HTML文件分析结果】\n"
-        prompt += task.html_analysis
-    
-    return prompt
-
-def call_ai_model(prompt, ai_config):
-    """调用AI模型生成分析报告"""
-    if ai_config.selected_model == 'deepseek':
-        url = "https://api.deepseek.com/v1/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {ai_config.deepseek_api_key}"
-        }
-        data = {
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "你面向的用户一般是教师和学生"},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 4000
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=data, timeout=60)
-            response.raise_for_status()
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
-        except Exception as e:
-            logger.error(f"DeepSeek API调用失败: {str(e)}")
-            raise Exception(f"DeepSeek API调用失败: {str(e)}")
-    
-    elif ai_config.selected_model == 'doubao':
-        url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {ai_config.doubao_api_key}"
-        }
-        data = {
-            "model": "doubao-seed-1-6-251015",
-            "messages": [
-                {"role": "system", "content": "你面向的用户一般是教师和学生"},
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": 0.7,
-            "max_tokens": 4000
-        }
-        
-        try:
-            response = requests.post(url, headers=headers, json=data, timeout=120)
-            response.raise_for_status()
-            result = response.json()
-            return result["choices"][0]["message"]["content"]
-        except Exception as e:
-            logger.error(f"豆包API调用失败: {str(e)}")
-            raise Exception(f"豆包API调用失败: {str(e)}")
-    
-    elif ai_config.selected_model == 'qwen':
-        url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {ai_config.qwen_api_key}"
-        }
-        data = {
-            "model": "qwen-plus",
-            "input": {
-                "messages": [
-                    {"role": "system", "content": "你面向的用户一般是教师和学生"},
-                    {"role": "user", "content": prompt}
-                ]
-            },
-            "parameters": {
-                "temperature": 0.7,
-                "max_tokens": 4000
-            }
-        }
-        
-        try:
-            logger.info(f"调用阿里云百炼API，模型: qwen-plus")
-            response = requests.post(url, headers=headers, json=data, timeout=120)
-            
-            if response.status_code != 200:
-                raise Exception(f"阿里云百炼API调用失败，状态码: {response.status_code}，响应: {response.text[:200]}")
-            
-            if not response.text:
-                raise Exception("阿里云百炼API返回空响应")
-            
-            try:
-                result = response.json()
-            except ValueError as ve:
-                raise Exception(f"阿里云百炼API返回非JSON响应: {response.text[:200]}")
-            
-            if isinstance(result, dict) and "code" in result and result["code"] != "200":
-                raise Exception(f"阿里云百炼API调用失败: {result.get('message', '未知错误')} (错误码: {result.get('code')})")
-            
-            if isinstance(result, dict):
-                if "output" in result and "text" in result["output"]:
-                    return result["output"]["text"]
-                elif "choices" in result and len(result["choices"]) > 0:
-                    choice = result["choices"][0]
-                    if "message" in choice and "content" in choice["message"]:
-                        return choice["message"]["content"]
-                    elif "text" in choice:
-                        return choice["text"]
-                elif "data" in result and "choices" in result["data"] and len(result["data"]["choices"]) > 0:
-                    choice = result["data"]["choices"][0]
-                    if "message" in choice and "content" in choice["message"]:
-                        return choice["message"]["content"]
-            
-            raise Exception(f"阿里云百炼API返回未知格式的响应: {str(result)[:200]}")
-        except requests.exceptions.RequestException as re:
-            logger.error(f"阿里云百炼API网络请求异常: {str(re)}")
-            raise Exception(f"阿里云百炼API网络请求异常: {str(re)}")
-        except Exception as e:
-            logger.error(f"阿里云百炼API调用失败: {str(e)}")
-            raise Exception(f"阿里云百炼API调用失败: {str(e)}")
-    
-    elif ai_config.selected_model == 'chat_server':
-        # 直接通过HTTP请求硅基流动 OpenAI 兼容接口（避免SDK依赖）
-        import os as _os
-        import requests as _requests
-        # Token 解析顺序：用户配置 > 环境变量 > 应用配置
-        api_key = (ai_config.chat_server_api_token or '').strip()
-        if not api_key:
-            api_key = (_os.environ.get('CHAT_SERVER_API_TOKEN', '') or '').strip()
-        if not api_key:
-            try:
-                api_key = (current_app.config.get('CHAT_SERVER_API_TOKEN', '') or '').strip()
-            except RuntimeError:
-                api_key = ''
-        if not api_key:
-            raise Exception('硅基流动未配置，请设置 CHAT_SERVER_API_TOKEN 或在配置页填写 Token')
-        url = 'https://api.siliconflow.cn/v1/chat/completions'
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {api_key}'
-        }
-        payload = {
-            'model': 'deepseek-ai/DeepSeek-V2.5',
-            'messages': [
-                {"role": "system", "content": "你面向的用户一般是教师和学生"},
-                {"role": "user", "content": prompt}
-            ]
-        }
-        try:
-            resp = _requests.post(url, headers=headers, json=payload, timeout=(5, 120))
-            if resp.status_code != 200:
-                raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
-            data = resp.json()
-            # OpenAI兼容结构
-            if isinstance(data, dict) and 'choices' in data and data['choices']:
-                choice = data['choices'][0]
-                # message.content 或 text
-                msg = (choice.get('message') or {})
-                content = msg.get('content') or choice.get('text')
-                if content:
-                    return content
-            raise Exception(f"未知响应格式: {str(data)[:200]}")
-        except _requests.Timeout as e:
-            logger.error(f"硅基流动超时: {e}")
-            raise Exception(f"硅基流动超时: {e}")
-        except Exception as e:
-            logger.error(f"硅基流动调用失败: {str(e)}")
-            raise Exception(f"硅基流动调用失败: {str(e)}")
-    else:
-        raise Exception(f"不支持的AI模型: {ai_config.selected_model}")
-
-def save_analysis_report(task_id, report_content):
-    """保存分析报告到文件系统和数据库"""
-    db = SessionLocal()
-    try:
-        task = db.query(Task).filter_by(id=task_id).first()
-        if task:
-            if not report_content or not report_content.strip():
-                report_content = "<div class='alert alert-info' role='alert'><h4>报告内容为空</h4><p>本次分析未能生成有效内容。可能是由于以下原因：</p><ul><li>提交的数据量不足</li><li>数据质量问题</li><li>AI模型处理异常</li></ul><p>请尝试提交更多数据或修改提示词后重新分析。</p></div>"
-            
-            html_report = f"""
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>分析报告 - {task.title}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 40px 20px;
-            background-color: #f8f9fa;
-        }}
-        .container {{
-            background-color: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }}
-        .markdown-body {{
-            font-size: 16px;
-        }}
-        .markdown-body h1, .markdown-body h2, .markdown-body h3 {{
-            color: #2c3e50;
-        }}
-        .markdown-body pre {{
-            background-color: #f6f8fa;
-            border-radius: 6px;
-        }}
-        .footer {{
-            text-align: center;
-            margin-top: 40px;
-            padding: 20px;
-            color: #6c757d;
-            font-size: 0.9rem;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1 class="mb-4">数据分析报告</h1>
-        <p><strong>任务标题：</strong>{task.title}</p>
-        <p><strong>创建时间：</strong>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-        
-        <div class="markdown-body">
-            {report_content}
-        </div>
-        
-        <div class="footer">
-            <p>由 QuickForm 智能分析功能生成</p>
-        </div>
-    </div>
-</body>
-</html>
-            """
-            
-            report_dir = os.path.join(UPLOAD_FOLDER, 'reports')
-            if not os.path.exists(report_dir):
-                os.makedirs(report_dir)
-            
-            report_filename = f"report_{task_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-            report_path = os.path.join(report_dir, report_filename)
-            
-            with open(report_path, 'w', encoding='utf-8') as f:
-                f.write(html_report)
-            
-            task.analysis_report = report_content
-            task.report_file_path = report_path
-            task.report_generated_at = datetime.now()
-            db.commit()
-            
-            with progress_lock:
-                completed_reports.add(task_id)
-            
-            logger.info(f"任务 {task_id} 的分析报告已保存")
-    except Exception as e:
-        logger.error(f"保存分析报告失败: {str(e)}")
-    finally:
-        db.close()
-
-def timeout(seconds, error_message="函数执行超时"):
-    """超时装饰器"""
-    import threading
-    from functools import wraps
-    
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            result = [None]
-            exception = [None]
-            
-            def target():
-                try:
-                    result[0] = func(*args, **kwargs)
-                except Exception as e:
-                    exception[0] = e
-            
-            thread = threading.Thread(target=target)
-            thread.daemon = True
-            thread.start()
-            thread.join(seconds)
-            
-            if thread.is_alive():
-                raise TimeoutError(error_message)
-            elif exception[0]:
-                raise exception[0]
-            else:
-                return result[0]
-        
-        return wrapper
-    
-    return decorator
-
-def perform_analysis_with_custom_prompt(task_id, user_id, ai_config_id, custom_prompt):
-    """使用自定义提示词执行分析任务"""
-    db = SessionLocal()
-    try:
-        task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
-        if not task:
-            with progress_lock:
-                analysis_progress[task_id] = {
-                    'status': 'error',
-                    'message': '任务不存在'
-                }
-            return
-        
-        submission = db.query(Submission).filter_by(task_id=task_id).all()
-        
-        file_content = None
-        if task.file_path and os.path.exists(task.file_path):
-            file_content = read_file_content(task.file_path)
-        
-        ai_config = db.query(AIConfig).filter_by(id=ai_config_id).first()
-        if not ai_config:
-            with progress_lock:
-                analysis_progress[task_id] = {
-                    'status': 'error',
-                    'message': 'AI配置不存在'
-                }
-            return
-        
-        if ai_config.selected_model == 'deepseek' and not ai_config.deepseek_api_key:
-            with progress_lock:
-                analysis_progress[task_id] = {
-                    'status': 'error',
-                    'message': 'DeepSeek API密钥未配置'
-                }
-            logging.error(f"任务 {task_id}：DeepSeek API密钥未配置")
-            return
-        elif ai_config.selected_model == 'doubao' and not ai_config.doubao_api_key:
-            with progress_lock:
-                analysis_progress[task_id] = {
-                    'status': 'error',
-                    'message': '豆包API密钥未配置完整'
-                }
-            logging.error(f"任务 {task_id}：豆包API密钥未配置完整")
-            return
-        
-        logging.info(f"任务 {task_id}：使用模型 {ai_config.selected_model}")
-        
-        with progress_lock:
-            analysis_progress[task_id] = {
-                'status': 'in_progress',
-                'progress': 0,
-                'message': '正在生成提示词...'
-            }
-        
-        prompt = custom_prompt
-        
-        with progress_lock:
-            analysis_progress[task_id] = {
-                'status': 'in_progress',
-                'progress': 1,
-                'message': '大模型分析中，这可能需要几分钟时间...'
-            }
-        logging.info(f"任务 {task_id}：调用AI模型进行分析")
-        
-        # 调整各模型超时，避免后端刚返回而前端已判定超时的情况
-        timeout_seconds = 180 if ai_config.selected_model == 'chat_server' else (120 if ai_config.selected_model in ['deepseek', 'qwen'] else 90)
-        
-        @timeout(seconds=timeout_seconds, error_message=f"调用{ai_config.selected_model}模型超时（{timeout_seconds}秒）")
-        def call_ai_with_timeout(prompt, config):
-            logging.info(f"开始调用 {config.selected_model} API，提示词长度: {len(prompt)} 字符，超时设置: {timeout_seconds}秒")
-            return call_ai_model(prompt, config)
-        
-        try:
-            analysis_report = call_ai_with_timeout(prompt, ai_config)
-            logging.info(f"成功获取 {ai_config.selected_model} API 响应，报告长度: {len(analysis_report)} 字符")
-        except TimeoutError as timeout_error:
-            error_msg = str(timeout_error)
-            logging.error(f"任务 {task_id}：{error_msg}")
-            with progress_lock:
-                analysis_progress[task_id] = {
-                    'status': 'error',
-                    'message': f"分析超时：{error_msg}，请检查网络连接或稍后重试"
-                }
-            return
-        except Exception as api_error:
-            logging.error(f"任务 {task_id}：AI模型调用失败: {str(api_error)}")
-            logging.error(f"详细错误堆栈: {traceback.format_exc()}")
-            with progress_lock:
-                analysis_progress[task_id] = {
-                    'status': 'error',
-                    'message': f'API调用失败: {str(api_error)}'
-                }
-            return
-        
-        if analysis_report.startswith("错误：") or \
-           (analysis_report.startswith("DeepSeek API调用") and "失败" in analysis_report) or \
-           (analysis_report.startswith("豆包API调用") and "失败" in analysis_report):
-            logging.error(f"任务 {task_id}：AI模型返回错误: {analysis_report}")
-            raise Exception(analysis_report)
-        
-        with progress_lock:
-            # 先保存到内存，确保状态查询能立即获取
-            analysis_results[task_id] = analysis_report
-            analysis_progress[task_id] = {
-                'status': 'completed',
-                'progress': 100,
-                'message': '分析完成，请查看报告',
-                'report': analysis_report  # 直接包含在progress中，确保前端能获取
-            }
-            logger.info(f"任务 {task_id} 报告已保存到内存，长度: {len(analysis_report)} 字符")
-        
-        # 保存到数据库（在锁外执行，避免阻塞状态查询）
-        try:
-            save_analysis_report(task_id, analysis_report)
-            logger.info(f"任务 {task_id} 报告已保存到数据库")
-        except Exception as e:
-            logger.error(f"保存报告到数据库失败 - Task ID: {task_id}, 错误: {str(e)}")
-            # 即使数据库保存失败，内存中已有报告，不影响用户查看
-            
-    except Exception as e:
-        with progress_lock:
-            analysis_progress[task_id] = {
-                'status': 'error',
-                'message': f'分析过程中出错: {str(e)}'
-            }
-    finally:
-        db.close()
 
 # 权限检查装饰器
 def admin_required(f):
@@ -1020,7 +189,7 @@ def create_task():
     db = SessionLocal()
     try:
         if not current_user.is_admin():
-            if not current_user.can_create_task():
+            if not current_user.can_create_task(SessionLocal, Task):
                 task_limit = current_user.task_limit if current_user.task_limit != -1 else "无限制"
                 task_count = db.query(Task).filter_by(user_id=current_user.id).count()
                 flash(f'您已达到任务数量上限（{task_limit}个，当前{task_count}个）。如需创建更多任务，请联系管理员：wzlinmiaoyan@163.com', 'warning')
@@ -1034,7 +203,7 @@ def create_task():
             
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
-                unique_filename, filepath = save_uploaded_file(file)
+                unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
                 if unique_filename:
                     task.file_name = file.filename
                     task.file_path = filepath
@@ -1044,7 +213,7 @@ def create_task():
             
             # 如果是HTML文件，在任务保存后自动在后台分析
             if task.file_path and task.file_path.lower().endswith(('.html', '.htm')):
-                analyze_html_file(task.id, current_user.id, task.file_path)
+                analyze_html_file(task.id, current_user.id, task.file_path, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
             
             flash('数据任务创建成功', 'success')
             return redirect(url_for('quickform.task_detail', task_id=task.id))
@@ -1103,7 +272,7 @@ def edit_task(task_id):
             
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
-                unique_filename, filepath = save_uploaded_file(file)
+                unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
                 if unique_filename:
                     if task.file_path and os.path.exists(task.file_path):
                         os.remove(task.file_path)
@@ -1112,7 +281,7 @@ def edit_task(task_id):
                     # 如果是HTML文件，自动在后台分析
                     if unique_filename.lower().endswith(('.html', '.htm')):
                         task.html_analysis = None  # 清空旧的分析结果
-                        analyze_html_file(task.id, current_user.id, filepath)
+                        analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
             elif remove_file:
                 if task.file_path and os.path.exists(task.file_path):
                     os.remove(task.file_path)
@@ -1161,29 +330,56 @@ def ai_test_page():
     """AI模型测试页面"""
     return render_template('ai_test.html')
 
-@quickform_bp.route('/api/submit/<string:task_id>', methods=['POST', 'OPTIONS'])
+@quickform_bp.route('/api/submit/<string:task_id>', methods=['GET', 'POST', 'OPTIONS'])
 def submit_form(task_id):
-    """表单提交API"""
+    """表单提交API - 支持GET查询和POST提交"""
     if request.method == 'OPTIONS':
         response = make_response()
         response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         response.headers['Content-Type'] = 'text/plain; charset=utf-8'
         return response
         
     db = SessionLocal()
     try:
-        logger.info(f"收到表单提交请求 - task_id: {task_id}")
-        
         task = db.query(Task).filter_by(task_id=task_id).first()
         if not task:
             response = jsonify({'error': '任务不存在', 'task_id': task_id, 'message': f'未找到ID为 {task_id} 的任务'})
             response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
-            logger.warning(f"提交失败: 任务不存在 - task_id: {task_id}")
+            logger.warning(f"请求失败: 任务不存在 - task_id: {task_id}")
             return response, 404
+        
+        # GET方法：返回任务数据统计
+        if request.method == 'GET':
+            submissions = db.query(Submission).filter_by(task_id=task.id).all()
+            data_list = []
+            for sub in submissions:
+                try:
+                    data = json.loads(sub.data)
+                    data['submitted_at'] = sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S')
+                    data_list.append(data)
+                except:
+                    data_list.append({
+                        'submitted_at': sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S'),
+                        'raw_data': sub.data
+                    })
+            
+            response = jsonify({
+                'task_id': task.task_id,
+                'task_title': task.title,
+                'total_submissions': len(data_list),
+                'submissions': data_list
+            })
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+            return response, 200
+        
+        # POST方法：提交数据
+        logger.info(f"收到表单提交请求 - task_id: {task_id}")
         
         # 获取提交的数据
         try:
@@ -1197,7 +393,7 @@ def submit_form(task_id):
             logger.error(f"解析请求数据失败: {str(e)}")
             response = jsonify({'error': '数据格式错误', 'message': str(e)})
             response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
             return response, 400
         
@@ -1213,20 +409,20 @@ def submit_form(task_id):
             logger.error(f"保存提交数据失败: {str(e)}")
             response = jsonify({'error': '保存失败', 'message': str(e)})
             response.headers['Access-Control-Allow-Origin'] = '*'
-            response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
             return response, 500
         
         response = jsonify({'message': '提交成功', 'status': 'success'})
         response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response, 200
     except Exception as e:
-        logger.error(f"提交API异常: {str(e)}", exc_info=True)
+        logger.error(f"API异常: {str(e)}", exc_info=True)
         response = jsonify({'error': '服务器错误', 'message': str(e)})
         response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response, 500
     finally:
@@ -1396,10 +592,14 @@ def smart_analyze(task_id):
                 file_content_for_prompt = None
                 if task.file_path and os.path.exists(task.file_path):
                     file_content_for_prompt = read_file_content(task.file_path)
-                custom_prompt = generate_analysis_prompt(task, submission_for_prompt, file_content_for_prompt)
+                custom_prompt = generate_analysis_prompt(task, submission_for_prompt, file_content_for_prompt, SessionLocal, Submission)
             try:
                 # 后台线程执行，避免阻塞主请求线程
-                t = threading.Thread(target=perform_analysis_with_custom_prompt, args=(task_id, current_user.id, ai_config.id, custom_prompt), daemon=True)
+                t = threading.Thread(target=perform_analysis_with_custom_prompt, args=(
+                    task_id, current_user.id, ai_config.id, custom_prompt,
+                    SessionLocal, Task, Submission, AIConfig,
+                    read_file_content, call_ai_model, save_analysis_report
+                ), daemon=True)
                 t.start()
                 # 跳转到本页并标记运行中，前端据此开始轮询
                 return redirect(url_for('quickform.smart_analyze', task_id=task.id, running=1))
@@ -1413,8 +613,18 @@ def smart_analyze(task_id):
         file_content = None
         if task.file_path and os.path.exists(task.file_path):
             file_content = read_file_content(task.file_path)
-        preview_prompt = generate_analysis_prompt(task, submission, file_content)
+        preview_prompt = generate_analysis_prompt(task, submission, file_content, SessionLocal, Submission)
         report = task.analysis_report if task and task.analysis_report else None
+
+        running_flag = request.args.get('running') == '1'
+        should_redirect = False
+        if running_flag:
+            with progress_lock:
+                prog = analysis_progress.get(task.id)
+            if prog and prog.get('status') == 'completed':
+                should_redirect = True
+        if should_redirect:
+            return redirect(url_for('quickform.smart_analyze', task_id=task.id))
         
         return render_template('smart_analyze.html', 
                              task=task, 
@@ -1428,34 +638,7 @@ def smart_analyze(task_id):
 @quickform_bp.route('/download_report/<int:task_id>')
 @login_required
 def download_report(task_id):
-    """下载报告 - PDF格式"""
-    # 修复reportlab与Python 3.9+的兼容性问题
-    import hashlib
-    import functools
-    
-    # 保存原始的md5函数
-    _original_md5 = hashlib.md5
-    
-    # 创建一个包装函数，过滤掉usedforsecurity参数
-    @functools.wraps(_original_md5)
-    def _md5_wrapper(*args, **kwargs):
-        # 移除usedforsecurity参数（Python 3.9+新增，但旧版reportlab不支持）
-        kwargs.pop('usedforsecurity', None)
-        return _original_md5(*args, **kwargs)
-    
-    # 临时替换hashlib.md5（在导入reportlab之前）
-    hashlib.md5 = _md5_wrapper
-    
-    # 导入reportlab相关模块
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    from reportlab.lib.enums import TA_LEFT, TA_CENTER
-    import re
-    
+    """下载报告 - 图片格式（PNG）"""
     db = SessionLocal()
     try:
         task = db.get(Task, task_id)
@@ -1469,123 +652,89 @@ def download_report(task_id):
         # 获取报告内容
         report_content = task.analysis_report or "暂无报告内容"
         
-        # 创建PDF
-        safe_title = re.sub(r'[^a-zA-Z0-9_\u4e00-\u9fa5]', '_', task.title)
-        safe_filename = f"{safe_title}_分析报告.pdf"
+        # 使用report_service中的函数生成图片
+        buffer, encoded_filename = generate_report_image(task, report_content)
         
-        # 创建内存中的PDF
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4)
-        story = []
-        
-        # 设置样式
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            textColor='#1a73e8',
-            spaceAfter=30,
-            alignment=TA_CENTER
-        )
-        heading_style = ParagraphStyle(
-            'CustomHeading',
-            parent=styles['Heading2'],
-            fontSize=14,
-            textColor='#333333',
-            spaceAfter=12,
-            spaceBefore=12
-        )
-        normal_style = ParagraphStyle(
-            'CustomNormal',
-            parent=styles['Normal'],
-            fontSize=11,
-            textColor='#000000',
-            spaceAfter=6,
-            leading=16
-        )
-        
-        # 添加标题
-        story.append(Paragraph(f"数据分析报告", title_style))
-        story.append(Spacer(1, 0.2*inch))
-        story.append(Paragraph(f"<b>任务标题：</b>{task.title}", normal_style))
-        story.append(Paragraph(f"<b>创建时间：</b>{task.created_at.strftime('%Y-%m-%d %H:%M:%S') if task.created_at else '未知'}", normal_style))
-        story.append(Spacer(1, 0.3*inch))
-        
-        # 将Markdown转换为纯文本并分段
-        # 简单的Markdown到文本转换
-        text_content = report_content
-        # 移除Markdown标记
-        text_content = re.sub(r'^#+\s+', '', text_content, flags=re.MULTILINE)
-        text_content = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text_content)
-        text_content = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text_content)
-        text_content = re.sub(r'`(.+?)`', r'<font face="Courier">\1</font>', text_content)
-        
-        # 按段落分割
-        paragraphs = text_content.split('\n\n')
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                continue
-            
-            # 检查是否是标题（以##开头）
-            if para.startswith('##'):
-                heading_text = para.replace('##', '').strip()
-                story.append(Paragraph(f"<b>{heading_text}</b>", heading_style))
-            elif para.startswith('#'):
-                heading_text = para.replace('#', '').strip()
-                story.append(Paragraph(f"<b>{heading_text}</b>", heading_style))
-            else:
-                # 处理列表
-                lines = para.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    # 处理列表项
-                    if line.startswith('- ') or line.startswith('* '):
-                        line = line[2:].strip()
-                        story.append(Paragraph(f"• {line}", normal_style))
-                    elif re.match(r'^\d+\.\s+', line):
-                        line = re.sub(r'^\d+\.\s+', '', line)
-                        story.append(Paragraph(f"• {line}", normal_style))
-                    else:
-                        story.append(Paragraph(line, normal_style))
-                story.append(Spacer(1, 0.1*inch))
-        
-        # 构建PDF
-        doc.build(story)
-        buffer.seek(0)
-        
-        # 返回PDF文件
+        # 返回图片文件
         response = make_response(buffer.getvalue())
-        response.headers['Content-Type'] = 'application/pdf'
-        response.headers['Content-Disposition'] = f'attachment; filename="{safe_filename}"'
+        response.headers['Content-Type'] = 'image/png'
+        # 使用RFC 2231编码处理文件名，避免latin-1编码错误
+        response.headers['Content-Disposition'] = f"attachment; filename*=UTF-8''{encoded_filename}"
         return response
         
     except Exception as e:
-        logger.error(f"生成PDF报告失败: {str(e)}")
-        flash(f'生成PDF报告时出错: {str(e)}', 'danger')
+        logger.error(f"生成图片报告失败: {str(e)}", exc_info=True)
+        flash(f'生成图片报告时出错: {str(e)}', 'danger')
         return redirect(url_for('quickform.dashboard'))
     finally:
-        # 恢复原始的md5函数
-        import hashlib
-        hashlib.md5 = _original_md5
         db.close()
 
 @quickform_bp.route('/uploads/<path:filename>')
 def uploaded_file(filename):
-    """上传文件访问 - HTML文件允许无密码访问"""
+    """上传文件访问 - HTML文件需要审核通过才能访问"""
     try:
-        # 检查文件扩展名，如果是HTML文件则允许无密码访问
+        # 检查文件扩展名，如果是HTML文件需要检查审核状态
         if filename.lower().endswith(('.html', '.htm')):
+            db = SessionLocal()
+            try:
+                # 查找包含此文件名的任务
+                task = db.query(Task).filter(Task.file_path.like(f'%{filename}')).first()
+                if task:
+                    # 管理员可直接访问原始文件
+                    if current_user.is_authenticated and current_user.is_admin():
+                        return send_from_directory(UPLOAD_FOLDER, filename)
+                    # 检查审核状态
+                    if task.html_approved != 1:
+                        # 未审核或已拒绝，显示审核中提示
+                        html_content = """
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>审核中</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #666; }
+        p { color: #999; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⏳ 管理员正在审核中</h1>
+        <p>该页面正在等待管理员审核，审核通过后即可访问。</p>
+    </div>
+</body>
+</html>
+                        """
+                        response = make_response(html_content)
+                        response.headers['Content-Type'] = 'text/html; charset=utf-8'
+                        return response
+                # 如果找不到任务或已审核通过，允许访问
+            finally:
+                db.close()
             return send_from_directory(UPLOAD_FOLDER, filename)
         else:
             # 非HTML文件需要登录
             if not current_user.is_authenticated:
                 flash('请先登录', 'warning')
                 return redirect(url_for('quickform.login'))
-            return send_from_directory(UPLOAD_FOLDER, filename)
+        return send_from_directory(UPLOAD_FOLDER, filename)
     except FileNotFoundError:
         flash('文件不存在', 'danger')
         return redirect(request.referrer or url_for('quickform.dashboard'))
@@ -1728,6 +877,64 @@ def admin_set_task_limit(user_id):
     
     return redirect(url_for('quickform.admin_panel'))
 
+@quickform_bp.route('/admin/review_html')
+@admin_required
+def admin_review_html():
+    """HTML文件审核页面"""
+    db = SessionLocal()
+    try:
+        # 获取所有有HTML文件的任务
+        tasks = db.query(Task).filter(Task.file_path.isnot(None)).filter(
+            Task.file_path.like('%.html') | Task.file_path.like('%.htm')
+        ).order_by(Task.created_at.desc()).all()
+        
+        # 获取审核信息
+        tasks_with_review = []
+        for task in tasks:
+            author = db.get(User, task.user_id)
+            approver = db.get(User, task.html_approved_by) if task.html_approved_by else None
+            tasks_with_review.append({
+                'task': task,
+                'author': author,
+                'approver': approver
+            })
+        
+        return render_template('admin_review.html', tasks_with_review=tasks_with_review)
+    finally:
+        db.close()
+
+@quickform_bp.route('/admin/review_html/<int:task_id>', methods=['POST'])
+@admin_required
+def admin_review_html_action(task_id):
+    """HTML文件审核操作"""
+    db = SessionLocal()
+    try:
+        task = db.get(Task, task_id)
+        if not task:
+            flash('任务不存在', 'danger')
+            return redirect(url_for('quickform.admin_review_html'))
+        
+        action = request.form.get('action')  # 'approve' 或 'reject'
+        
+        if action == 'approve':
+            task.html_approved = 1
+            task.html_approved_by = current_user.id
+            task.html_approved_at = datetime.now()
+            db.commit()
+            flash(f'已通过任务 "{task.title}" 的HTML文件审核', 'success')
+        elif action == 'reject':
+            task.html_approved = -1
+            task.html_approved_by = current_user.id
+            task.html_approved_at = datetime.now()
+            db.commit()
+            flash(f'已拒绝任务 "{task.title}" 的HTML文件审核', 'warning')
+        else:
+            flash('无效的操作', 'danger')
+    finally:
+        db.close()
+    
+    return redirect(url_for('quickform.admin_review_html'))
+
 @quickform_bp.route('/task/<int:task_id>/delete_submission', methods=['DELETE'])
 @login_required
 def delete_submission(task_id):
@@ -1804,7 +1011,7 @@ def init_quickform(app, login_manager_instance=None):
     
     # 执行数据库迁移
     try:
-        migrate_user_table()
+        migrate_database(engine)
     except Exception as e:
         logger.warning(f"数据库迁移警告: {str(e)}")
     

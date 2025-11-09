@@ -98,9 +98,14 @@
                 <div class="mb-3">
                     <label class="form-label"><strong>精简版提示词（点击复制）：</strong></label>
                     <div class="input-group">
-                        <textarea class="form-control" id="simple-prompt-text" rows="2" readonly style="font-family: 'Courier New', monospace; font-size: 13px;">向这个网址 '{{ request.host_url }}quickform/api/submit/{{ task.task_id }}' 发送 json 格式的 POST 请求</textarea>
+                        <textarea class="form-control" id="simple-prompt-text" rows="3" readonly style="font-family: 'Courier New', monospace; font-size: 13px;">创建完应用后，向 '{{ request.host_url }}quickform/api/submit/{{ task.task_id }}' 发送post格式的json数据</textarea>
                         <button class="btn btn-outline-primary" onclick="copyToClipboardText('simple-prompt-text')">复制</button>
                     </div>
+                </div>
+                
+                <!-- GET方法说明 -->
+                <div class="alert alert-info mb-3">
+                    <strong>💡 数据查询功能：</strong>直接访问该网址就能看到已收集的数据，可以用它继续制作实时反馈排名页面。
                 </div>
 
                 <div class="mb-3">

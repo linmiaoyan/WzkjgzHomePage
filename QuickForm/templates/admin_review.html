@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+
+{% block title %}HTML文件审核 - QuickForm{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="mb-0">HTML文件审核</h2>
+            <a href="{{ url_for('quickform.admin_panel') }}" class="btn btn-secondary">返回管理面板</a>
+        </div>
+
+        <ul class="nav nav-tabs mb-4">
+            <li class="nav-item">
+                <a class="nav-link active" aria-current="page" href="javascript:void(0);">HTML审核</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{{ url_for('quickform.admin_panel') }}">管理员面板</a>
+            </li>
+        </ul>
+        
+        {% if tasks_with_review %}
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">待审核和已审核的HTML文件</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>任务ID</th>
+                                <th>任务标题</th>
+                                <th>上传用户</th>
+                                <th>文件名</th>
+                                <th>审核状态</th>
+                                <th>审核人</th>
+                                <th>审核时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in tasks_with_review %}
+                            <tr>
+                                <td>{{ item.task.id }}</td>
+                                <td>{{ item.task.title }}</td>
+                                <td>{{ item.author.username if item.author else '未知' }}</td>
+                                <td>
+                                    {% if item.task.file_name and item.task.file_path %}
+                                    {% set filename = item.task.file_path.replace('\\', '/').split('/')[-1] %}
+                                    <a href="{{ url_for('quickform.uploaded_file', filename=filename) }}" target="_blank">
+                                        {{ item.task.file_name }}
+                                    </a>
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if item.task.html_approved == 1 %}
+                                    <span class="badge bg-success">已通过</span>
+                                    {% elif item.task.html_approved == -1 %}
+                                    <span class="badge bg-danger">已拒绝</span>
+                                    {% else %}
+                                    <span class="badge bg-warning">待审核</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ item.approver.username if item.approver else '-' }}</td>
+                                <td>{{ item.task.html_approved_at.strftime('%Y-%m-%d %H:%M:%S') if item.task.html_approved_at else '-' }}</td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#previewModal{{ item.task.id }}">
+                                            预览HTML
+                                        </button>
+                                        {% if item.task.html_approved != 1 %}
+                                        <form method="POST" action="{{ url_for('quickform.admin_review_html_action', task_id=item.task.id) }}" style="display: inline;">
+                                            <button type="submit" name="action" value="approve" class="btn btn-sm btn-success" onclick="return confirm('确定要通过审核吗？')">通过</button>
+                                        </form>
+                                        {% endif %}
+                                        {% if item.task.html_approved != -1 %}
+                                        <form method="POST" action="{{ url_for('quickform.admin_review_html_action', task_id=item.task.id) }}" style="display: inline;">
+                                            <button type="submit" name="action" value="reject" class="btn btn-sm btn-danger" onclick="return confirm('确定要拒绝审核吗？')">拒绝</button>
+                                        </form>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        {% for item in tasks_with_review %}
+        {% set filename = item.task.file_path.replace('\\', '/').split('/')[-1] if item.task.file_path else None %}
+        <div class="modal fade" id="previewModal{{ item.task.id }}" tabindex="-1">
+            <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">HTML文件预览 - {{ item.task.title }}</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <strong>任务信息：</strong>
+                            <ul>
+                                <li>任务标题：{{ item.task.title }}</li>
+                                <li>上传用户：{{ item.author.username if item.author else '未知' }}</li>
+                                <li>用户邮箱：{{ item.author.email if item.author else '-' }}</li>
+                                <li>用户学校：{{ item.author.school if item.author else '-' }}</li>
+                                <li>创建时间：{{ item.task.created_at.strftime('%Y-%m-%d %H:%M:%S') if item.task.created_at else '-' }}</li>
+                            </ul>
+                        </div>
+                        <div class="mb-3">
+                            <strong>HTML内容预览：</strong>
+                            {% if filename %}
+                            <iframe src="{{ url_for('quickform.uploaded_file', filename=filename) }}"
+                                    style="width: 100%; height: 600px; border: 1px solid #ddd; border-radius: 4px;"
+                                    loading="lazy"></iframe>
+                            {% else %}
+                            <p class="text-muted">文件路径不存在</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="alert alert-info">
+            <p>暂无需要审核的HTML文件。</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
