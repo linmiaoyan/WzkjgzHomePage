@@ -1429,6 +1429,24 @@ def smart_analyze(task_id):
 @login_required
 def download_report(task_id):
     """下载报告 - PDF格式"""
+    # 修复reportlab与Python 3.9+的兼容性问题
+    import hashlib
+    import functools
+    
+    # 保存原始的md5函数
+    _original_md5 = hashlib.md5
+    
+    # 创建一个包装函数，过滤掉usedforsecurity参数
+    @functools.wraps(_original_md5)
+    def _md5_wrapper(*args, **kwargs):
+        # 移除usedforsecurity参数（Python 3.9+新增，但旧版reportlab不支持）
+        kwargs.pop('usedforsecurity', None)
+        return _original_md5(*args, **kwargs)
+    
+    # 临时替换hashlib.md5（在导入reportlab之前）
+    hashlib.md5 = _md5_wrapper
+    
+    # 导入reportlab相关模块
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
@@ -1550,6 +1568,9 @@ def download_report(task_id):
         flash(f'生成PDF报告时出错: {str(e)}', 'danger')
         return redirect(url_for('quickform.dashboard'))
     finally:
+        # 恢复原始的md5函数
+        import hashlib
+        hashlib.md5 = _original_md5
         db.close()
 
 @quickform_bp.route('/uploads/<path:filename>')
