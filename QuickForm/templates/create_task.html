@@ -10,6 +10,19 @@
                 <h3 class="text-center mb-0">创建数据任务</h3>
             </div>
             <div class="card-body">
+                {% if not current_user.is_admin() %}
+                    {% if is_certified %}
+                    <div class="alert alert-success d-flex align-items-center gap-2">
+                        <span class="badge bg-success">认证教师</span>
+                        <span class="mb-0">您的账号已通过教师认证，任务创建数量无限制。</span>
+                    </div>
+                    {% else %}
+                    <div class="alert alert-warning">
+                        {% set limit_value = task_limit if task_limit and task_limit != -1 else 3 %}
+                        <strong>提示：</strong> 当前任务上限为 {{ limit_value }} 个（已创建 {{ task_count }} 个）。如需更高上限，请前往个人设置发起教师认证或联系管理员。
+                    </div>
+                    {% endif %}
+                {% endif %}
                 <form method="POST" action="{{ url_for('quickform.create_task') }}" enctype="multipart/form-data">
                     <div class="mb-4">
                         <label for="title" class="form-label">任务标题</label>
@@ -31,7 +44,7 @@
                         <div class="alert alert-info">
                             <h6 class="alert-heading">创建任务后，您将获得：</h6>
                             <ul class="mb-0">
-                                <li>一个唯一的提交URL，用于接收表单数据</li>
+                                <li>一个唯一的数据接口地址（URL），用于接收表单数据</li>
                                 <li>数据管理和分析工具</li>
                                 <li>导出数据功能</li>
                                 <li>文件管理能力（上传的文件将与任务关联）</li>

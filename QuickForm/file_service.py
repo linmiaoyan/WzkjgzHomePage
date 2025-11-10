@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 # 允许的文件扩展名
-ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'zip'}
+ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'zip'}
 
 
 def allowed_file(filename):

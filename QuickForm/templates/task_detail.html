@@ -60,6 +60,15 @@
                         </svg>
                         {{ task.file_name }}
                     </a>
+                    {% if task.html_approved == -1 %}
+                    <div class="alert alert-danger mt-3" role="alert">
+                        页面审核结果：已被拒绝。原因：{{ task.html_review_note or '管理员未提供原因' }}。
+                    </div>
+                    {% elif task.html_approved != 1 %}
+                    <div class="alert alert-warning mt-3" role="alert">
+                        页面正在审核中，暂时无法公开访问。若需修改，请重新上传。
+                    </div>
+                    {% endif %}
                 </div>
                 {% endif %}
             </div>
@@ -81,7 +90,7 @@
                 
                 <!-- URL显示 -->
                 <div class="mb-3">
-                    <label class="form-label"><strong>提交URL：</strong></label>
+                    <label class="form-label"><strong>数据接口地址（URL）：</strong></label>
                     <div class="input-group">
                         <input type="text" class="form-control" readonly value="{{ request.host_url }}quickform/api/submit/{{ task.task_id }}" id="post-url">
                         <button class="btn btn-outline-secondary" onclick="copyToClipboard('post-url')">

@@ -203,7 +203,22 @@ def dashboard():
     db = SessionLocal()
     try:
         tasks = db.query(Task).filter_by(user_id=current_user.id).order_by(Task.created_at.desc()).all()
-        return render_template('dashboard.html', tasks=tasks, task_count=len(tasks))
+        user_record = db.query(User).get(current_user.id)
+        task_limit = None
+        is_certified = False
+        if user_record:
+            task_limit = user_record.task_limit
+            is_certified = bool(user_record.is_certified)
+        else:
+            task_limit = getattr(current_user, 'task_limit', None)
+            is_certified = bool(getattr(current_user, 'is_certified', False))
+        return render_template(
+            'dashboard.html',
+            tasks=tasks,
+            task_count=len(tasks),
+            task_limit=task_limit,
+            is_certified=is_certified
+        )
     finally:
         db.close()
 
@@ -264,8 +279,8 @@ def create_task():
     db = SessionLocal()
     try:
         if not current_user.is_admin():
-            task_count = db.query(Task).filter_by(user_id=current_user.id).count()
-            if task_count >= 3:
+            if not current_user.can_create_task(SessionLocal, Task):
+                task_count = db.query(Task).filter_by(user_id=current_user.id).count()
                 flash('您已达到任务数量上限（3个）。如需创建更多任务，请联系管理员：wzlinmiaoyan@163.com', 'warning')
                 return redirect(url_for('dashboard'))
         
@@ -287,9 +302,13 @@ def create_task():
             db.commit()
             flash('数据任务创建成功', 'success')
             return redirect(url_for('task_detail', task_id=task.id))
+
+        task_count = db.query(Task).filter_by(user_id=current_user.id).count()
+        task_limit = getattr(current_user, 'task_limit', None)
+        is_certified = bool(getattr(current_user, 'is_certified', False))
     finally:
         db.close()
-    return render_template('create_task.html')
+    return render_template('create_task.html', task_limit=task_limit, is_certified=is_certified, task_count=task_count)
 
 @app.route('/task/<int:task_id>')
 @login_required
@@ -592,6 +611,46 @@ def admin_change_role(user_id):
         db.close()
     return redirect(url_for('admin_panel'))
 
+# 注册Blueprint兼容的端点别名，确保模板中的 url_for('quickform.xxx') 可正常解析
+_endpoint_aliases = {
+    'index': 'quickform.index',
+    'register': 'quickform.register',
+    'login': 'quickform.login',
+    'logout': 'quickform.logout',
+    'dashboard': 'quickform.dashboard',
+    'create_task': 'quickform.create_task',
+    'task_detail': 'quickform.task_detail',
+    'edit_task': 'quickform.edit_task',
+    'delete_task': 'quickform.delete_task',
+    'ai_test_page': 'quickform.ai_test_page',
+    'submit_form': 'quickform.submit_form',
+    'list_tasks': 'quickform.list_tasks',
+    'export_data': 'quickform.export_data',
+    'profile': 'quickform.profile',
+    'certification_request': 'quickform.certification_request',
+    'test_ai_api': 'quickform.test_ai_api',
+    'smart_analyze': 'quickform.smart_analyze',
+    'download_report': 'quickform.download_report',
+    'uploaded_file': 'quickform.uploaded_file',
+    'generate_report': 'quickform.generate_report',
+    'report_status': 'quickform.report_status',
+    'admin_panel': 'quickform.admin_panel',
+    'admin_change_role': 'quickform.admin_change_role',
+    'admin_set_task_limit': 'quickform.admin_set_task_limit',
+    'admin_review_html': 'quickform.admin_review_html',
+    'admin_review_html_batch': 'quickform.admin_review_html_batch',
+    'admin_view_certification_file': 'quickform.admin_view_certification_file',
+    'admin_handle_certification': 'quickform.admin_handle_certification',
+    'admin_review_html_action': 'quickform.admin_review_html_action',
+    'delete_submission': 'quickform.delete_submission',
+    'delete_all_submissions': 'quickform.delete_all_submissions',
+}
+for original, alias in _endpoint_aliases.items():
+    view_func = app.view_functions.get(original)
+    if view_func:
+        app.view_functions[alias] = view_func
+
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=True, host='0.0.0.0', port=80)
 

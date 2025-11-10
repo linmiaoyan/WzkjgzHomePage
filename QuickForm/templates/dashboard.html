@@ -45,12 +45,20 @@
                     <div>
                     <h4>任务列表</h4>
                         {% if not current_user.is_admin() %}
+                        {% if is_certified %}
+                        <div class="small">
+                            <span class="badge bg-success me-2">认证教师</span>
+                            <span class="text-muted">任务创建数量：无限制（当前 {{ tasks|length }} 个）</span>
+                        </div>
+                        {% else %}
                         <small class="text-muted">
-                            您已创建 {{ tasks|length }} / 3 个任务
-                            {% if tasks|length >= 3 %}
-                            <span class="badge bg-warning">已达到上限</span>
+                            {% set limit_value = task_limit if task_limit and task_limit != -1 else 3 %}
+                            您已创建 {{ tasks|length }} / {{ limit_value }} 个任务
+                            {% if task_limit != -1 and tasks|length >= (task_limit or 3) %}
+                            <span class="badge bg-warning text-dark ms-2">已达到上限</span>
                             {% endif %}
                         </small>
+                        {% endif %}
                         {% endif %}
                     </div>
                     <a href="{{ url_for('quickform.create_task') }}" class="btn btn-primary">
@@ -85,7 +93,7 @@
                             <small class="text-muted">提交数量: {{ task.submission|length }}</small>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label text-sm font-weight-bold">提交URL:</label>
+                            <label class="form-label text-sm font-weight-bold">数据接口地址（URL）:</label>
                             <div class="input-group">
                                 <input type="text" class="form-control form-control-sm" readonly value="{{ request.host_url }}quickform/api/submit/{{ task.task_id }}" id="url-{{ task.id }}">
                                 <button class="btn btn-outline-secondary btn-sm" onclick="copyToClipboard('url-{{ task.id }}')">复制</button>

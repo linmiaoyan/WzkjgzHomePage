@@ -1,5 +1,5 @@
 """数据库模型定义和迁移"""
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, inspect, text
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from flask_login import UserMixin
@@ -22,9 +22,18 @@ class User(UserMixin, Base):
     phone = Column(String(20))
     role = Column(String(20), default='user')
     task_limit = Column(Integer, default=3)  # 任务创建上限，-1表示无限制
+    is_certified = Column(Boolean, default=False)
+    certified_at = Column(DateTime)
+    certification_note = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
     tasks = relationship('Task', back_populates='author', foreign_keys='Task.user_id')
     ai_config = relationship('AIConfig', back_populates='user', uselist=False)
+    certification_requests = relationship(
+        'CertificationRequest',
+        foreign_keys='CertificationRequest.user_id',
+        back_populates='user',
+        cascade='all, delete-orphan'
+    )
     
     def is_admin(self):
         """检查用户是否为管理员"""
@@ -68,6 +77,7 @@ class Task(Base):
     html_approved = Column(Integer, default=0)  # HTML审核状态：0=待审核，1=已通过，-1=已拒绝
     html_approved_by = Column(Integer, ForeignKey('user.id'), nullable=True)  # 审核人ID
     html_approved_at = Column(DateTime, nullable=True)  # 审核时间
+    html_review_note = Column(Text)
     approver = relationship('User', foreign_keys=[html_approved_by], backref='approved_tasks')
 
 
@@ -93,6 +103,22 @@ class AIConfig(Base):
     # 硅基流动（ChatServer）配置
     chat_server_api_url = Column(String(200))
     chat_server_api_token = Column(String(200))
+
+
+class CertificationRequest(Base):
+    __tablename__ = 'certification_request'
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey('user.id'), nullable=False)
+    status = Column(Integer, default=0)  # 0=待审核 1=已通过 -1=已拒绝
+    file_name = Column(String(255))
+    file_path = Column(String(500))
+    created_at = Column(DateTime, default=datetime.now)
+    reviewed_at = Column(DateTime)
+    reviewed_by = Column(Integer, ForeignKey('user.id'))
+    review_note = Column(Text)
+
+    user = relationship('User', back_populates='certification_requests', foreign_keys=[user_id])
+    reviewer = relationship('User', foreign_keys=[reviewed_by], backref='processed_certification_requests')
 
 
 def migrate_database(engine):
@@ -133,6 +159,27 @@ def migrate_database(engine):
                     logger.info("成功添加task_limit字段到user表")
                 except Exception as e:
                     logger.warning(f"添加task_limit字段失败（可能已存在）: {str(e)}")
+
+            if 'is_certified' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN is_certified BOOLEAN DEFAULT 0"))
+                    logger.info("成功为user表添加is_certified字段")
+                except Exception as e:
+                    logger.warning(f"添加is_certified字段失败（可能已存在）: {str(e)}")
+
+            if 'certified_at' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN certified_at DATETIME"))
+                    logger.info("成功为user表添加certified_at字段")
+                except Exception as e:
+                    logger.warning(f"添加certified_at字段失败（可能已存在）: {str(e)}")
+
+            if 'certification_note' not in columns:
+                try:
+                    conn.execute(text("ALTER TABLE user ADD COLUMN certification_note TEXT"))
+                    logger.info("成功为user表添加certification_note字段")
+                except Exception as e:
+                    logger.warning(f"添加certification_note字段失败（可能已存在）: {str(e)}")
             
             # ai_config 新增 chat_server 字段
             if ai_cfg_cols and 'chat_server_api_url' not in ai_cfg_cols:
@@ -175,5 +222,20 @@ def migrate_database(engine):
                     logger.info("成功为task添加html_approved_at字段")
                 except Exception as e:
                     logger.warning(f"添加html_approved_at失败（可能已存在）: {str(e)}")
+
+            if task_cols and 'html_review_note' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN html_review_note TEXT"))
+                    logger.info("成功为task添加html_review_note字段")
+                except Exception as e:
+                    logger.warning(f"添加html_review_note失败（可能已存在）: {str(e)}")
+
+            # 创建认证申请表
+            if 'certification_request' not in inspector.get_table_names():
+                try:
+                    CertificationRequest.__table__.create(bind=engine)
+                    logger.info("成功创建certification_request表")
+                except Exception as e:
+                    logger.warning(f"创建certification_request表失败: {str(e)}")
     except Exception as e:
         logger.error(f"数据库迁移失败: {str(e)}")

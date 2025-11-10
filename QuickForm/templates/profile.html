@@ -20,6 +20,38 @@
                         {% endfor %}
                     {% endif %}
                 {% endwith %}
+
+                {% if user.is_certified %}
+                <div class="alert alert-success d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>已认证教师：</strong> 您的账号已完成教师身份认证，任务创建不再受限，上传的 HTML 页面将自动公开访问。
+                        {% if user.certified_at %}
+                        <span class="ms-2 text-muted">通过时间：{{ user.certified_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% elif pending_cert_request %}
+                <div class="alert alert-warning d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>认证审核中：</strong> 我们已于 {{ pending_cert_request.created_at.strftime('%Y-%m-%d %H:%M') }} 收到您的认证材料，请耐心等待管理员审核。
+                    </div>
+                    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('quickform.certification_request') }}">查看详情</a>
+                </div>
+                {% elif last_cert_request and last_cert_request.status == -1 %}
+                <div class="alert alert-danger d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>认证未通过：</strong> 管理员反馈：{{ last_cert_request.review_note or '未填写原因' }}。请准备更充分的材料后重新提交。
+                    </div>
+                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('quickform.certification_request') }}">重新发起认证</a>
+                </div>
+                {% else %}
+                <div class="alert alert-info d-flex justify-content-between align-items-center">
+                    <div>
+                        <strong>尚未认证：</strong> 提交教师身份认证可解除任务数量限制，并跳过 HTML 页面人工审核。
+                    </div>
+                    <a class="btn btn-sm btn-primary" href="{{ url_for('quickform.certification_request') }}">发起认证</a>
+                </div>
+                {% endif %}
                 
                 <ul class="nav nav-tabs mb-4">
                     <li class="nav-item">
@@ -84,8 +116,23 @@
                                     <small class="form-text text-muted">请输入您的阿里云百炼 API密钥</small>
                                 </div>
                             </div>
-                            
+
                             <button type="submit" class="btn btn-success mt-4">保存配置</button>
+
+                            <div class="border rounded p-3 mt-4 bg-light">
+                                <h6 class="mb-2">API 连通性测试</h6>
+                                <p class="small text-muted mb-3">保存配置后，可通过下方快速测试按钮确认模型接口是否可正常响应。</p>
+                                <label for="test-ai-prompt" class="form-label small text-muted">测试提示词（可选）</label>
+                                <textarea id="test-ai-prompt" class="form-control" rows="2" placeholder="例如：请回复“OK”，用于连通性测试。"></textarea>
+                                <div class="d-flex align-items-center gap-2 mt-3">
+                                    <button type="button" class="btn btn-outline-primary" id="test-ai-btn">测试接口</button>
+                                    <div class="spinner-border spinner-border-sm text-primary d-none" id="test-ai-spinner" role="status">
+                                        <span class="visually-hidden">测试中…</span>
+                                    </div>
+                                </div>
+                                <div id="test-ai-result" class="mt-2 small"></div>
+                                <p class="small text-muted mt-3 mb-0">若修改了上方配置，请先点击“保存配置”，再进行连通性测试。</p>
+                            </div>
                         </form>
                     </div>
                     
@@ -149,6 +196,52 @@ document.addEventListener('DOMContentLoaded', function(){
     }
     sel.addEventListener('change', updateShow);
     updateShow();
+
+    var testBtn = document.getElementById('test-ai-btn');
+    var promptInput = document.getElementById('test-ai-prompt');
+    var resultEl = document.getElementById('test-ai-result');
+    var spinner = document.getElementById('test-ai-spinner');
+    if (testBtn && resultEl) {
+        testBtn.addEventListener('click', function(){
+            if (!spinner.classList.contains('d-none')) {
+                return;
+            }
+            resultEl.textContent = '';
+            spinner.classList.remove('d-none');
+            testBtn.disabled = true;
+            var payload = { prompt: promptInput ? promptInput.value : '' };
+            fetch('{{ url_for('quickform.test_ai_api') }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(async function(resp){
+                var text = await resp.text();
+                var data;
+                try { data = JSON.parse(text); } catch (e) { data = { success: false, message: text || '接口无响应' }; }
+                if (!resp.ok || !data.success) {
+                    var msg = data && data.message ? data.message : '测试失败，请检查配置';
+                    throw new Error(msg);
+                }
+                var model = data.model_label || data.model || '';
+                var preview = data.response_preview || '';
+                resultEl.classList.remove('text-danger');
+                resultEl.classList.add('text-success');
+                resultEl.innerHTML = '模型：<strong>' + model + '</strong>，响应：' + (preview ? preview : '请求成功');
+            })
+            .catch(function(err){
+                resultEl.classList.remove('text-success');
+                resultEl.classList.add('text-danger');
+                resultEl.textContent = '❌ ' + (err.message || '测试失败，请稍后重试');
+            })
+            .finally(function(){
+                spinner.classList.add('d-none');
+                testBtn.disabled = false;
+            });
+        });
+    }
 });
 </script>
 {% endblock %}

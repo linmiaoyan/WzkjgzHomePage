@@ -4,9 +4,11 @@ QuickForm Blueprint
 """
 import os
 import json
+import math
 import threading
+import html
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file, send_from_directory, current_app
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
 from flask_login import LoginManager, login_user, login_required, logout_user, current_user
 from flask_bcrypt import Bcrypt
@@ -21,7 +23,7 @@ import logging
 from functools import wraps
 
 # 导入分离的模块
-from models import Base, User, Task, Submission, AIConfig, migrate_database
+from models import Base, User, Task, Submission, AIConfig, migrate_database, CertificationRequest
 from file_service import save_uploaded_file, read_file_content, ALLOWED_EXTENSIONS
 from ai_service import call_ai_model, generate_analysis_prompt, analyze_html_file
 from report_service import (
@@ -51,11 +53,22 @@ UPLOAD_FOLDER = os.path.join(QUICKFORM_DIR, 'uploads')
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+CERTIFICATION_FOLDER = os.path.join(UPLOAD_FOLDER, 'certifications')
+if not os.path.exists(CERTIFICATION_FOLDER):
+    os.makedirs(CERTIFICATION_FOLDER)
+
 # 允许的文件扩展名
-ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'zip'}
+ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'zip'}
 
 # 数据库配置（相对于QuickForm目录）
 DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
+
+MODEL_LABELS = {
+    'chat_server': '硅基流动',
+    'deepseek': 'DeepSeek',
+    'doubao': '豆包',
+    'qwen': '阿里云百炼'
+}
 
 # 初始化SQLAlchemy
 engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False})
@@ -177,8 +190,23 @@ def dashboard():
     db = SessionLocal()
     try:
         tasks = db.query(Task).filter_by(user_id=current_user.id).order_by(Task.created_at.desc()).all()
+        user_record = db.get(User, current_user.id)
         task_count = len(tasks)
-        return render_template('dashboard.html', tasks=tasks, task_count=task_count)
+        task_limit = None
+        is_certified = False
+        if user_record:
+            task_limit = user_record.task_limit
+            is_certified = bool(user_record.is_certified)
+        else:
+            task_limit = getattr(current_user, 'task_limit', None)
+            is_certified = bool(getattr(current_user, 'is_certified', False))
+        return render_template(
+            'dashboard.html',
+            tasks=tasks,
+            task_count=task_count,
+            task_limit=task_limit,
+            is_certified=is_certified
+        )
     finally:
         db.close()
 
@@ -207,6 +235,17 @@ def create_task():
                 if unique_filename:
                     task.file_name = file.filename
                     task.file_path = filepath
+                    if filepath.lower().endswith(('.html', '.htm')) and getattr(current_user, 'is_certified', False):
+                        task.html_approved = 1
+                        task.html_approved_by = current_user.id
+                        task.html_approved_at = datetime.now()
+                        task.html_review_note = None
+                    else:
+                        if filepath.lower().endswith(('.html', '.htm')):
+                            task.html_approved = 0
+                            task.html_approved_by = None
+                            task.html_approved_at = None
+                            task.html_review_note = None
             
             db.add(task)
             db.commit()
@@ -219,7 +258,18 @@ def create_task():
             return redirect(url_for('quickform.task_detail', task_id=task.id))
         
         # GET 渲染创建页面
-        return render_template('create_task.html')
+        user_record = db.get(User, current_user.id)
+        task_count = db.query(Task).filter_by(user_id=current_user.id).count()
+        task_limit = None
+        is_certified = False
+        if user_record:
+            task_limit = user_record.task_limit
+            is_certified = bool(user_record.is_certified)
+        else:
+            task_limit = getattr(current_user, 'task_limit', None)
+            is_certified = bool(getattr(current_user, 'is_certified', False))
+
+        return render_template('create_task.html', task_limit=task_limit, is_certified=is_certified, task_count=task_count)
     finally:
         db.close()
 
@@ -279,7 +329,17 @@ def edit_task(task_id):
                     task.file_name = file.filename
                     task.file_path = filepath
                     # 如果是HTML文件，自动在后台分析
-                    if unique_filename.lower().endswith(('.html', '.htm')):
+                    if filepath.lower().endswith(('.html', '.htm')):
+                        if getattr(current_user, 'is_certified', False):
+                            task.html_approved = 1
+                            task.html_approved_by = current_user.id
+                            task.html_approved_at = datetime.now()
+                            task.html_review_note = None
+                        else:
+                            task.html_approved = 0
+                            task.html_approved_by = None
+                            task.html_approved_at = None
+                            task.html_review_note = None
                         task.html_analysis = None  # 清空旧的分析结果
                         analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
             elif remove_file:
@@ -287,7 +347,7 @@ def edit_task(task_id):
                     os.remove(task.file_path)
                 task.file_name = None
                 task.file_path = None
-                task.html_analysis = None  # 清空分析结果
+                task.html_review_note = None
             
             db.commit()
             flash('任务更新成功', 'success')
@@ -511,7 +571,10 @@ def profile():
     db = SessionLocal()
     try:
         ai_config = db.query(AIConfig).filter_by(user_id=current_user.id).first()
-        
+        user_record = db.get(User, current_user.id)
+        pending_cert_request = db.query(CertificationRequest).filter_by(user_id=current_user.id, status=0).order_by(CertificationRequest.created_at.desc()).first()
+        last_cert_request = db.query(CertificationRequest).filter_by(user_id=current_user.id).order_by(CertificationRequest.created_at.desc()).first()
+
         if request.method == 'POST':
             if 'selected_model' in request.form:
                 selected_model = request.form.get('selected_model')
@@ -520,7 +583,7 @@ def profile():
                 qwen_api_key = request.form.get('qwen_api_key', '')
                 chat_server_api_url = request.form.get('chat_server_api_url', '')
                 chat_server_api_token = request.form.get('chat_server_api_token', '')
-                
+
                 if ai_config:
                     ai_config.selected_model = selected_model
                     ai_config.deepseek_api_key = deepseek_api_key
@@ -539,24 +602,117 @@ def profile():
                         chat_server_api_token=chat_server_api_token
                     )
                     db.add(ai_config)
-                
+
                 db.commit()
                 flash('AI配置更新成功', 'success')
-            
+
             elif 'current_password' in request.form:
                 current_password = request.form.get('current_password')
                 new_password = request.form.get('new_password')
-                
+
                 if bcrypt.check_password_hash(current_user.password, current_password):
-                    current_user.password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+                    hashed = bcrypt.generate_password_hash(new_password).decode('utf-8')
+                    current_user.password = hashed
+                    if user_record:
+                        user_record.password = hashed
                     db.commit()
                     flash('密码修改成功', 'success')
                 else:
                     flash('当前密码错误', 'danger')
-            
+
             return redirect(url_for('quickform.profile'))
-        
-        return render_template('profile.html', user=current_user, ai_config=ai_config)
+
+        return render_template(
+            'profile.html',
+            user=user_record or current_user,
+            ai_config=ai_config,
+            pending_cert_request=pending_cert_request,
+            last_cert_request=last_cert_request
+        )
+    finally:
+        db.close()
+
+@quickform_bp.route('/certification/request', methods=['GET', 'POST'])
+@login_required
+def certification_request():
+    """教师认证申请"""
+    db = SessionLocal()
+    try:
+        user = db.get(User, current_user.id)
+        if not user:
+            flash('用户不存在', 'danger')
+            return redirect(url_for('quickform.dashboard'))
+
+        pending_request = db.query(CertificationRequest).filter_by(user_id=user.id, status=0).order_by(CertificationRequest.created_at.desc()).first()
+        requests = db.query(CertificationRequest).filter_by(user_id=user.id).order_by(CertificationRequest.created_at.desc()).all()
+
+        if request.method == 'POST':
+            if user.is_certified:
+                flash('您已完成认证，无需重复提交。', 'info')
+                return redirect(url_for('quickform.profile'))
+            if pending_request:
+                flash('您已有待审核的认证申请，请耐心等待结果。', 'warning')
+                return redirect(url_for('quickform.certification_request'))
+
+            file = request.files.get('certificate_file')
+            if not file or not file.filename.strip():
+                flash('请上传能够证明教师身份的材料（允许图片或PDF）。', 'danger')
+                return redirect(url_for('quickform.certification_request'))
+
+            unique_filename, filepath = save_uploaded_file(file, CERTIFICATION_FOLDER)
+            if not unique_filename:
+                flash('文件上传失败或格式不支持，请重试。', 'danger')
+                return redirect(url_for('quickform.certification_request'))
+
+            cert_request = CertificationRequest(
+                user_id=user.id,
+                file_name=file.filename,
+                file_path=filepath,
+                status=0,
+                created_at=datetime.now()
+            )
+            db.add(cert_request)
+            db.commit()
+            flash('认证申请已提交，请等待管理员审核。', 'success')
+            return redirect(url_for('quickform.profile'))
+
+        return render_template('certification_request.html', user=user, requests=requests, pending_request=pending_request)
+    finally:
+        db.close()
+
+@quickform_bp.route('/api/test_ai', methods=['POST'])
+@login_required
+def test_ai_api():
+    """测试当前用户的AI配置是否可用"""
+    db = SessionLocal()
+    try:
+        ai_config = db.query(AIConfig).filter_by(user_id=current_user.id).first()
+        if not ai_config or not ai_config.selected_model:
+            return jsonify({'success': False, 'message': '请先保存AI配置后再测试'}), 400
+
+        payload = request.get_json(silent=True) or {}
+        test_prompt = (payload.get('prompt') or '这是一次连通性测试，请简短回复“OK”。').strip()
+        if not test_prompt:
+            test_prompt = '这是一次连通性测试，请简短回复“OK”。'
+
+        try:
+            response_text = call_ai_model(test_prompt, ai_config)
+        except Exception as e:
+            logger.error(f"AI配置测试失败: {str(e)}")
+            return jsonify({'success': False, 'message': str(e)}), 500
+
+        preview = (response_text or '').strip()
+        if len(preview) > 200:
+            preview = preview[:200] + '...'
+
+        model_label = MODEL_LABELS.get(ai_config.selected_model, ai_config.selected_model)
+        return jsonify({
+            'success': True,
+            'message': '调用成功，请确认响应内容是否符合预期',
+            'model': ai_config.selected_model,
+            'model_label': model_label,
+            'response_preview': preview
+        })
     finally:
         db.close()
 
@@ -574,15 +730,17 @@ def smart_analyze(task_id):
         ai_config = db.query(AIConfig).filter_by(user_id=current_user.id).first()
         
         if not ai_config or not ai_config.selected_model:
-            return render_template('smart_analyze.html', task=task, error="请先在配置页面设置AI模型和API密钥", ai_config=ai_config, now=datetime.now())
+            return render_template('smart_analyze.html', task=task, error="请先在配置页面设置AI模型和API密钥", ai_config=ai_config, now=datetime.now(), model_label=None)
         
+        model_label = MODEL_LABELS.get(ai_config.selected_model, ai_config.selected_model)
+
         if ai_config.selected_model == 'chat_server':
             if not current_app.config.get('CHAT_SERVER_API_TOKEN'):
                 flash('当前使用默认 ChatServer 调用，建议在配置中设置专属 API Token（非必填）。', 'warning')
         elif ai_config.selected_model == 'deepseek' and not ai_config.deepseek_api_key:
-            return render_template('smart_analyze.html', task=task, error="请先配置DeepSeek API密钥", ai_config=ai_config, now=datetime.now())
+            return render_template('smart_analyze.html', task=task, error="请先配置DeepSeek API密钥", ai_config=ai_config, now=datetime.now(), model_label=model_label)
         elif ai_config.selected_model == 'doubao' and not ai_config.doubao_api_key:
-            return render_template('smart_analyze.html', task=task, error="请先配置豆包API密钥", ai_config=ai_config, now=datetime.now())
+            return render_template('smart_analyze.html', task=task, error="请先配置豆包API密钥", ai_config=ai_config, now=datetime.now(), model_label=model_label)
         
         # 如果是提交生成请求，则同步生成并返回同页结果
         if request.method == 'POST':
@@ -604,7 +762,7 @@ def smart_analyze(task_id):
                 # 跳转到本页并标记运行中，前端据此开始轮询
                 return redirect(url_for('quickform.smart_analyze', task_id=task.id, running=1))
             except Exception as e:
-                return render_template('smart_analyze.html', task=task, error=f'生成报告失败: {str(e)}', ai_config=ai_config, now=datetime.now())
+                return render_template('smart_analyze.html', task=task, error=f'生成报告失败: {str(e)}', ai_config=ai_config, now=datetime.now(), model_label=model_label)
         
         # GET 或 POST 完成后，准备页面所需数据
         # 刷新task对象以获取最新的html_analysis
@@ -631,7 +789,8 @@ def smart_analyze(task_id):
                              report=report,
                              preview_prompt=preview_prompt,
                              ai_config=ai_config,
-                             now=datetime.now())
+                             now=datetime.now(),
+                             model_label=model_label)
     finally:
         db.close()
 
@@ -685,39 +844,50 @@ def uploaded_file(filename):
                         return send_from_directory(UPLOAD_FOLDER, filename)
                     # 检查审核状态
                     if task.html_approved != 1:
-                        # 未审核或已拒绝，显示审核中提示
-                        html_content = """
+                        if task.html_approved == -1:
+                            reason = html.escape(task.html_review_note or '管理员未提供原因')
+                            title_text = '审核未通过'
+                            message = f"页面未通过审核，原因：{reason}"
+                            status_icon = '❌'
+                        else:
+                            title_text = '审核中'
+                            message = '该页面正在等待管理员审核，审核通过后即可访问。'
+                            status_icon = '⏳'
+
+                        html_content = f"""
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang=\"zh-CN\">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>审核中</title>
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+    <title>{title_text}</title>
     <style>
-        body {
+        body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
             background-color: #f5f5f5;
-        }
-        .container {
+            padding: 16px;
+        }}
+        .container {{
+            max-width: 520px;
             text-align: center;
             padding: 40px;
             background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 { color: #666; }
-        p { color: #999; margin-top: 20px; }
+            border-radius: 12px;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.1);
+        }}
+        h1 {{ color: #333; margin-bottom: 16px; font-size: 24px; }}
+        p {{ color: #555; margin-top: 12px; line-height: 1.6; }}
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>⏳ 管理员正在审核中</h1>
-        <p>该页面正在等待管理员审核，审核通过后即可访问。</p>
+    <div class=\"container\">
+        <h1>{status_icon} {title_text}</h1>
+        <p>{message}</p>
     </div>
 </body>
 </html>
@@ -784,25 +954,54 @@ def admin_panel():
         today = datetime.now().date()
         today_start = datetime.combine(today, datetime.min.time())
         
-        users = db.query(User).order_by(User.created_at.desc()).all()
+        page = request.args.get('page', 1, type=int)
+        if not page or page < 1:
+            page = 1
+        per_page = 20
+        search_keyword = (request.args.get('q') or '').strip()
+
+        user_query = db.query(User)
+        if search_keyword:
+            like_pattern = f"%{search_keyword}%"
+            user_query = user_query.filter(
+                or_(
+                    User.username.ilike(like_pattern),
+                    User.email.ilike(like_pattern),
+                    User.school.ilike(like_pattern),
+                    User.phone.ilike(like_pattern)
+                )
+            )
+
+        total_filtered_users = user_query.count()
+        total_pages = max(math.ceil(total_filtered_users / per_page), 1) if total_filtered_users else 1
+        if page > total_pages:
+            page = total_pages
+
+        users = (
+            user_query
+            .order_by(User.created_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
         all_tasks = db.query(Task).order_by(Task.created_at.desc()).all()
-        
+
         total_users = db.query(User).count()
         admin_users = db.query(User).filter_by(role='admin').count()
         normal_users = db.query(User).filter_by(role='user').count()
         new_users_today = db.query(User).filter(User.created_at >= today_start).count()
-        
+
         total_tasks = db.query(Task).count()
         new_tasks_today = db.query(Task).filter(Task.created_at >= today_start).count()
         avg_tasks_per_user = total_tasks / total_users if total_users > 0 else 0
-        
+
         total_submissions = db.query(Submission).count()
         new_submissions_today = db.query(Submission).filter(Submission.submitted_at >= today_start).count()
         avg_submissions_per_task = total_submissions / total_tasks if total_tasks > 0 else 0
-        
+
         tasks_with_reports = db.query(Task).filter(Task.analysis_report.isnot(None)).count()
         report_generation_rate = (tasks_with_reports / total_tasks * 100) if total_tasks > 0 else 0
-        
+
         stats = {
             'total_users': total_users,
             'admin_users': admin_users,
@@ -817,8 +1016,18 @@ def admin_panel():
             'tasks_with_reports': tasks_with_reports,
             'report_generation_rate': report_generation_rate
         }
-        
-        return render_template('admin.html', users=users, all_tasks=all_tasks, stats=stats)
+
+        return render_template(
+            'admin.html',
+            users=users,
+            all_tasks=all_tasks,
+            stats=stats,
+            user_search=search_keyword,
+            user_page=page,
+            user_pages=total_pages,
+            user_total=total_filtered_users,
+            user_per_page=per_page
+        )
     finally:
         db.close()
 
@@ -880,16 +1089,15 @@ def admin_set_task_limit(user_id):
 @quickform_bp.route('/admin/review_html')
 @admin_required
 def admin_review_html():
-    """HTML文件审核页面"""
+    """审核中心：HTML页面与认证申请"""
     db = SessionLocal()
     try:
-        # 获取所有有HTML文件的任务
         tasks = db.query(Task).filter(Task.file_path.isnot(None)).filter(
             Task.file_path.like('%.html') | Task.file_path.like('%.htm')
         ).order_by(Task.created_at.desc()).all()
-        
-        # 获取审核信息
+
         tasks_with_review = []
+        pending_html_count = 0
         for task in tasks:
             author = db.get(User, task.user_id)
             approver = db.get(User, task.html_approved_by) if task.html_approved_by else None
@@ -898,10 +1106,154 @@ def admin_review_html():
                 'author': author,
                 'approver': approver
             })
-        
-        return render_template('admin_review.html', tasks_with_review=tasks_with_review)
+            if task.html_approved != 1:
+                pending_html_count += 1
+
+        cert_requests = db.query(CertificationRequest).order_by(CertificationRequest.created_at.desc()).all()
+        pending_cert_count = sum(1 for req in cert_requests if req.status == 0)
+
+        return render_template(
+            'admin_review.html',
+            tasks_with_review=tasks_with_review,
+            pending_html_count=pending_html_count,
+            cert_requests=cert_requests,
+            pending_cert_count=pending_cert_count
+        )
     finally:
         db.close()
+
+@quickform_bp.route('/admin/review_html/batch', methods=['POST'])
+@admin_required
+def admin_review_html_batch():
+    """批量通过HTML审核"""
+    db = SessionLocal()
+    try:
+        raw_ids = request.form.getlist('task_ids')
+        task_ids = []
+        for value in raw_ids:
+            try:
+                task_ids.append(int(value))
+            except (TypeError, ValueError):
+                continue
+
+        if not task_ids:
+            flash('请选择至少一个待审核的任务', 'warning')
+            return redirect(url_for('quickform.admin_review_html'))
+
+        tasks = db.query(Task).filter(Task.id.in_(task_ids)).all()
+        if not tasks:
+            flash('未找到所选任务', 'warning')
+            return redirect(url_for('quickform.admin_review_html'))
+
+        updated_count = 0
+        for task in tasks:
+            if task.html_approved == 1:
+                continue
+            task.html_approved = 1
+            task.html_approved_by = current_user.id
+            task.html_approved_at = datetime.now()
+            task.html_review_note = None
+            updated_count += 1
+
+        if updated_count:
+            db.commit()
+            flash(f'成功通过 {updated_count} 个任务的HTML页面审核', 'success')
+        else:
+            db.rollback()
+            flash('所选任务均已通过审核，无需重复操作', 'info')
+    except Exception as e:
+        db.rollback()
+        logger.error(f"批量HTML审核失败: {str(e)}")
+        flash(f'批量审核失败：{str(e)}', 'danger')
+    finally:
+        db.close()
+
+
+@quickform_bp.route('/admin/certification/<int:request_id>/file')
+@admin_required
+def admin_view_certification_file(request_id):
+    """管理员查看认证材料"""
+    db = SessionLocal()
+    try:
+        cert_request = db.get(CertificationRequest, request_id)
+        if not cert_request or not cert_request.file_path or not os.path.exists(cert_request.file_path):
+            flash('认证材料不存在或已被删除。', 'danger')
+            return redirect(url_for('quickform.admin_review_html'))
+        filename = os.path.basename(cert_request.file_path)
+        try:
+            return send_file(cert_request.file_path, download_name=filename, as_attachment=False)
+        except TypeError:
+            return send_file(cert_request.file_path, attachment_filename=filename, as_attachment=False)
+    finally:
+        db.close()
+
+
+@quickform_bp.route('/admin/certification/<int:request_id>', methods=['POST'])
+@admin_required
+def admin_handle_certification(request_id):
+    """管理员审核教师认证申请"""
+    action = request.form.get('action')
+    note = (request.form.get('note') or '').strip()
+
+    db = SessionLocal()
+    try:
+        cert_request = db.get(CertificationRequest, request_id)
+        if not cert_request:
+            flash('认证申请不存在', 'danger')
+            return redirect(url_for('quickform.admin_review_html'))
+
+        user = cert_request.user
+        if not user:
+            flash('无法找到申请人信息', 'danger')
+            return redirect(url_for('quickform.admin_review_html'))
+
+        if action == 'approve':
+            if cert_request.status == 1:
+                flash('该认证申请已通过审核', 'info')
+                return redirect(url_for('quickform.admin_review_html'))
+
+            cert_request.status = 1
+            cert_request.reviewed_at = datetime.now()
+            cert_request.reviewed_by = current_user.id
+            cert_request.review_note = note
+
+            user.is_certified = True
+            user.certified_at = datetime.now()
+            user.certification_note = note
+            if user.task_limit != -1:
+                user.task_limit = -1
+
+            # 自动通过该用户所有待审核的HTML任务
+            pending_tasks = db.query(Task).filter(Task.user_id == user.id, Task.html_approved != 1).all()
+            for task in pending_tasks:
+                task.html_approved = 1
+                task.html_approved_by = current_user.id
+                task.html_approved_at = datetime.now()
+                task.html_review_note = None
+
+            db.commit()
+            flash(f'已通过 {user.username} 的认证申请，任务上限已调整为无限制。', 'success')
+        elif action == 'reject':
+            if cert_request.status == -1:
+                flash('该认证申请已被拒绝', 'info')
+                return redirect(url_for('quickform.admin_review_html'))
+
+            cert_request.status = -1
+            cert_request.reviewed_at = datetime.now()
+            cert_request.reviewed_by = current_user.id
+            cert_request.review_note = note
+            db.commit()
+            flash('已拒绝该认证申请。', 'warning')
+        else:
+            flash('无效的操作类型', 'danger')
+    except Exception as e:
+        db.rollback()
+        logger.error(f"认证审核处理失败: {str(e)}")
+        flash(f'处理失败：{str(e)}', 'danger')
+    finally:
+        db.close()
+
+    return redirect(url_for('quickform.admin_review_html'))
 
 @quickform_bp.route('/admin/review_html/<int:task_id>', methods=['POST'])
 @admin_required
@@ -915,17 +1267,23 @@ def admin_review_html_action(task_id):
             return redirect(url_for('quickform.admin_review_html'))
         
         action = request.form.get('action')  # 'approve' 或 'reject'
+        note = (request.form.get('note') or '').strip()
         
         if action == 'approve':
             task.html_approved = 1
             task.html_approved_by = current_user.id
             task.html_approved_at = datetime.now()
+            task.html_review_note = note if note else None
             db.commit()
             flash(f'已通过任务 "{task.title}" 的HTML文件审核', 'success')
         elif action == 'reject':
+            if not note:
+                flash('拒绝审核时需要填写原因。', 'danger')
+                return redirect(url_for('quickform.admin_review_html'))
             task.html_approved = -1
             task.html_approved_by = current_user.id
             task.html_approved_at = datetime.now()
+            task.html_review_note = note
             db.commit()
             flash(f'已拒绝任务 "{task.title}" 的HTML文件审核', 'warning')
         else:
@@ -1054,6 +1412,8 @@ def init_quickform(app, login_manager_instance=None):
         os.makedirs(UPLOAD_FOLDER)
     if not os.path.exists(os.path.join(UPLOAD_FOLDER, 'reports')):
         os.makedirs(os.path.join(UPLOAD_FOLDER, 'reports'))
+    if not os.path.exists(CERTIFICATION_FOLDER):
+        os.makedirs(CERTIFICATION_FOLDER)
     
     logger.info("QuickForm Blueprint 初始化完成")
 
