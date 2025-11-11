@@ -370,7 +370,7 @@ function sendTestData() {
             return;
         }
         
-        const baseUrl = `{{ url_for('quickform.delete_submission', task_id=task.id) }}?submission_id=${subId}`;
+        const baseUrl = `{{ url_for('quickform.remove_submission', task_id=task.id) }}?submission_id=${subId}`;
         const url = baseUrl + `&_=${Date.now()}`;
         fetch(url, {
             method: 'GET',
@@ -408,7 +408,7 @@ function sendTestData() {
             return;
         }
         
-        const baseUrl = `{{ url_for('quickform.delete_all_submissions', task_id=task.id) }}`;
+        const baseUrl = `{{ url_for('quickform.clear_all_submissions', task_id=task.id) }}`;
         const url = baseUrl + `?_=${Date.now()}`;
         fetch(url, {
             method: 'GET',

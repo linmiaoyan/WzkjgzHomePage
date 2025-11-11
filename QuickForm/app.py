@@ -657,7 +657,7 @@ def admin_change_role(user_id):
         db.close()
     return redirect(url_for('admin_panel'))
 
-@app.route('/task/<int:task_id>/delete_submission', methods=['GET'])
+@app.route('/task/<int:task_id>/submission/remove', methods=['GET'])
 @login_required
 def delete_submission(task_id):
     db = SessionLocal()
@@ -690,7 +690,7 @@ def delete_submission(task_id):
         db.close()
 
 
-@app.route('/task/<int:task_id>/delete_all_submissions', methods=['GET'])
+@app.route('/task/<int:task_id>/submissions/clear', methods=['GET'])
 @login_required
 def delete_all_submissions(task_id):
     db = SessionLocal()
@@ -750,8 +750,8 @@ _endpoint_aliases = {
     'admin_view_certification_file': 'quickform.admin_view_certification_file',
     'admin_handle_certification': 'quickform.admin_handle_certification',
     'admin_review_html_action': 'quickform.admin_review_html_action',
-    'delete_submission': 'quickform.delete_submission',
-    'delete_all_submissions': 'quickform.delete_all_submissions',
+    'remove_submission': 'quickform.remove_submission',
+    'clear_all_submissions': 'quickform.clear_all_submissions',
 }
 for original, alias in _endpoint_aliases.items():
     view_func = app.view_functions.get(original)
