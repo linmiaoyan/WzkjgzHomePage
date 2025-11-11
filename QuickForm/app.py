@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import logging
 from functools import wraps
+import math
 
 # 导入模型和工具
 from models import Base, User, Task, Submission, AIConfig
@@ -319,9 +320,41 @@ def task_detail(task_id):
         if not task or task.user_id != current_user.id:
             flash('无权访问此任务', 'danger')
             return redirect(url_for('dashboard'))
-        
-        submission = db.query(Submission).filter_by(task_id=task.id).order_by(Submission.submitted_at.desc()).all()
-        return render_template('task_detail.html', task=task, submission=submission)
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        if page < 1:
+            page = 1
+        if per_page < 1:
+            per_page = 20
+        elif per_page > 200:
+            per_page = 200
+
+        query = db.query(Submission).filter_by(task_id=task.id).order_by(Submission.submitted_at.desc())
+        total_submissions = query.count()
+        total_pages = max(math.ceil(total_submissions / per_page), 1) if total_submissions else 1
+        if page > total_pages:
+            page = total_pages
+
+        submissions = query.offset((page - 1) * per_page).limit(per_page).all()
+
+        saved_filename = task.file_path
+        saved_filename = os.path.basename(saved_filename) if saved_filename else None
+
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'pages': total_pages
+        }
+
+        return render_template(
+            'task_detail.html',
+            task=task,
+            submissions=submissions,
+            total_submissions=total_submissions,
+            pagination=pagination,
+            saved_filename=saved_filename
+        )
     finally:
         db.close()
 

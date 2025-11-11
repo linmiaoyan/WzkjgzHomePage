@@ -288,15 +288,54 @@ def task_detail(task_id):
         if task.user_id != current_user.id:
             flash('无权访问此任务', 'danger')
             return redirect(url_for('quickform.dashboard'))
-        
-        submission = db.query(Submission).filter_by(task_id=task.id).order_by(Submission.submitted_at.desc()).all()
+
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        if page < 1:
+            page = 1
+        if per_page < 1:
+            per_page = 20
+        elif per_page > 200:
+            per_page = 200
+
+        submission_query = (
+            db.query(Submission)
+            .filter_by(task_id=task.id)
+            .order_by(Submission.submitted_at.desc())
+        )
+        total_submissions = submission_query.count()
+        total_pages = max(math.ceil(total_submissions / per_page), 1) if total_submissions else 1
+        if page > total_pages:
+            page = total_pages
+
+        submissions = (
+            submission_query
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+
         saved_filename = None
         try:
             if task.file_path:
                 saved_filename = os.path.basename(task.file_path)
         except Exception:
             saved_filename = None
-        return render_template('task_detail.html', task=task, submission=submission, saved_filename=saved_filename)
+
+        pagination = {
+            'page': page,
+            'per_page': per_page,
+            'pages': total_pages
+        }
+
+        return render_template(
+            'task_detail.html',
+            task=task,
+            submissions=submissions,
+            total_submissions=total_submissions,
+            pagination=pagination,
+            saved_filename=saved_filename
+        )
     finally:
         db.close()
 
