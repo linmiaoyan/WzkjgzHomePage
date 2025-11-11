@@ -657,6 +657,68 @@ def admin_change_role(user_id):
         db.close()
     return redirect(url_for('admin_panel'))
 
+@app.route('/task/<int:task_id>/delete_submission', methods=['DELETE', 'GET'])
+@login_required
+def delete_submission(task_id):
+    db = SessionLocal()
+    submission_id = request.args.get('submission_id', type=int)
+
+    def make_response(payload, status=200):
+        resp = jsonify(payload)
+        resp.status_code = status
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+
+    try:
+        task = db.query(Task).get(task_id)
+        if not task or task.user_id != current_user.id:
+            return make_response({'success': False, 'message': '无权访问此任务'}, 403)
+        if not submission_id:
+            return make_response({'success': False, 'message': '缺少提交ID'}, 400)
+
+        submission = db.query(Submission).filter_by(id=submission_id, task_id=task_id).first()
+        if not submission:
+            return make_response({'success': False, 'message': '提交不存在'}, 404)
+
+        db.delete(submission)
+        db.commit()
+        return make_response({'success': True, 'message': '删除成功'})
+    except Exception as e:
+        db.rollback()
+        return make_response({'success': False, 'message': f'删除失败: {str(e)}'}, 500)
+    finally:
+        db.close()
+
+
+@app.route('/task/<int:task_id>/delete_all_submissions', methods=['DELETE', 'GET'])
+@login_required
+def delete_all_submissions(task_id):
+    db = SessionLocal()
+
+    def make_response(payload, status=200):
+        resp = jsonify(payload)
+        resp.status_code = status
+        resp.headers['Cache-Control'] = 'no-store'
+        return resp
+
+    try:
+        task = db.query(Task).get(task_id)
+        if not task or task.user_id != current_user.id:
+            return make_response({'success': False, 'message': '无权访问此任务'}, 403)
+
+        submissions = db.query(Submission).filter_by(task_id=task_id).all()
+        count = len(submissions)
+        for submission in submissions:
+            db.delete(submission)
+
+        db.commit()
+        return make_response({'success': True, 'message': f'成功删除 {count} 条数据'})
+    except Exception as e:
+        db.rollback()
+        return make_response({'success': False, 'message': f'删除失败: {str(e)}'}, 500)
+    finally:
+        db.close()
+
 # 注册Blueprint兼容的端点别名，确保模板中的 url_for('quickform.xxx') 可正常解析
 _endpoint_aliases = {
     'index': 'quickform.index',
