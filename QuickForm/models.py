@@ -78,6 +78,7 @@ class Task(Base):
     html_approved_by = Column(Integer, ForeignKey('user.id'), nullable=True)  # 审核人ID
     html_approved_at = Column(DateTime, nullable=True)  # 审核时间
     html_review_note = Column(Text)
+    rate_limit_log = Column(Text)
     approver = relationship('User', foreign_keys=[html_approved_by], backref='approved_tasks')
 
 
@@ -229,6 +230,13 @@ def migrate_database(engine):
                     logger.info("成功为task添加html_review_note字段")
                 except Exception as e:
                     logger.warning(f"添加html_review_note失败（可能已存在）: {str(e)}")
+
+            if task_cols and 'rate_limit_log' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN rate_limit_log TEXT"))
+                    logger.info("成功为task添加rate_limit_log字段")
+                except Exception as e:
+                    logger.warning(f"添加rate_limit_log失败（可能已存在）: {str(e)}")
 
             # 创建认证申请表
             if 'certification_request' not in inspector.get_table_names():

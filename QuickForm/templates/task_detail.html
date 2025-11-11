@@ -71,6 +71,15 @@
                     {% endif %}
                 </div>
                 {% endif %}
+
+                {% if task.rate_limit_log %}
+                <div class="mt-3">
+                    <div class="alert alert-warning" role="alert">
+                        <strong>系统提醒：</strong> 检测到短时间内来自部分 IP 的异常提交，已自动暂时阻断。详情：
+                        <pre class="bg-light border mt-2 p-2 mb-0" style="white-space: pre-wrap; font-size: 0.9rem;">{{ task.rate_limit_log }}</pre>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
         

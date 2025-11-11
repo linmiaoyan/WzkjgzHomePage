@@ -21,6 +21,8 @@ import matplotlib.pyplot as plt
 from dotenv import load_dotenv
 import logging
 from functools import wraps
+from collections import deque
+from typing import Deque
 
 # 导入分离的模块
 from models import Base, User, Task, Submission, AIConfig, migrate_database, CertificationRequest
@@ -390,6 +392,13 @@ def ai_test_page():
     """AI模型测试页面"""
     return render_template('ai_test.html')
 
+SUBMIT_RATE_LIMIT_WINDOW = 10  # seconds
+SUBMIT_RATE_LIMIT_THRESHOLD = 5
+SUBMIT_BLACKLIST_DURATION = 600  # seconds (10 minutes)
+
+rate_limit_cache = {}
+
+
 @quickform_bp.route('/api/submit/<string:task_id>', methods=['GET', 'POST', 'OPTIONS'])
 def submit_form(task_id):
     """表单提交API - 支持GET查询和POST提交"""
@@ -440,7 +449,21 @@ def submit_form(task_id):
         
         # POST方法：提交数据
         logger.info(f"收到表单提交请求 - task_id: {task_id}")
-        
+ 
+        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+        now_ts = datetime.utcnow().timestamp()
+
+        ip_info = rate_limit_cache.setdefault(client_ip, {
+            'events': deque(),
+            'blacklist_until': 0,
+            'blocked_tasks': {}
+        })
+
+        # 检查黑名单
+        if ip_info['blacklist_until'] and now_ts < ip_info['blacklist_until']:
+            logger.warning(f"IP {client_ip} 正在黑名单中，拒绝 task_id={task_id} 的提交")
+            return _rate_limit_response(task_id, client_ip, now_ts, db)
+
         # 获取提交的数据
         try:
             if request.is_json:
@@ -457,6 +480,20 @@ def submit_form(task_id):
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
             return response, 400
         
+        # 速率限制处理
+        events: Deque = ip_info['events']
+        while events and now_ts - events[0] > SUBMIT_RATE_LIMIT_WINDOW:
+            events.popleft()
+        events.append(now_ts)
+
+        if len(events) > SUBMIT_RATE_LIMIT_THRESHOLD:
+            ip_info['blacklist_until'] = now_ts + SUBMIT_BLACKLIST_DURATION
+            ip_info['blocked_tasks'][task.id] = now_ts
+            logger.warning(
+                f"IP {client_ip} 在 {SUBMIT_RATE_LIMIT_WINDOW}s 内提交 {len(events)} 次，已加入黑名单 {SUBMIT_BLACKLIST_DURATION}s"
+            )
+            return _rate_limit_response(task_id, client_ip, now_ts, db)
+
         # 将数据转换为JSON字符串存储
         import json
         try:
@@ -487,6 +524,30 @@ def submit_form(task_id):
         return response, 500
     finally:
         db.close()
+
+
+def _rate_limit_response(task_id, client_ip, ts, db):
+    if db:
+        task = db.query(Task).filter_by(task_id=task_id).first()
+        if task:
+            notice = f"IP {client_ip} 在 {SUBMIT_RATE_LIMIT_WINDOW}s 内多次提交，已暂时封禁 {SUBMIT_BLACKLIST_DURATION // 60} 分钟"
+            log_entry = f"[{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}] {notice}"
+            existing = task.rate_limit_log or ''
+            if existing:
+                task.rate_limit_log = existing + '\n' + log_entry
+            else:
+                task.rate_limit_log = log_entry
+            try:
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error(f"记录限流日志失败: {str(e)}")
+ 
+    response = jsonify({'error': 'rate_limit', 'message': '提交过于频繁，请稍后再试'})
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    return response, 429
 
 @quickform_bp.route('/api/tasks', methods=['GET'])
 def list_tasks():
@@ -574,7 +635,7 @@ def profile():
         user_record = db.get(User, current_user.id)
         pending_cert_request = db.query(CertificationRequest).filter_by(user_id=current_user.id, status=0).order_by(CertificationRequest.created_at.desc()).first()
         last_cert_request = db.query(CertificationRequest).filter_by(user_id=current_user.id).order_by(CertificationRequest.created_at.desc()).first()
-
+        
         if request.method == 'POST':
             if 'selected_model' in request.form:
                 selected_model = request.form.get('selected_model')
@@ -583,7 +644,7 @@ def profile():
                 qwen_api_key = request.form.get('qwen_api_key', '')
                 chat_server_api_url = request.form.get('chat_server_api_url', '')
                 chat_server_api_token = request.form.get('chat_server_api_token', '')
-
+                
                 if ai_config:
                     ai_config.selected_model = selected_model
                     ai_config.deepseek_api_key = deepseek_api_key
@@ -602,14 +663,14 @@ def profile():
                         chat_server_api_token=chat_server_api_token
                     )
                     db.add(ai_config)
-
+                
                 db.commit()
                 flash('AI配置更新成功', 'success')
-
+            
             elif 'current_password' in request.form:
                 current_password = request.form.get('current_password')
                 new_password = request.form.get('new_password')
-
+                
                 if bcrypt.check_password_hash(current_user.password, current_password):
                     hashed = bcrypt.generate_password_hash(new_password).decode('utf-8')
                     current_user.password = hashed
@@ -619,9 +680,9 @@ def profile():
                     flash('密码修改成功', 'success')
                 else:
                     flash('当前密码错误', 'danger')
-
+            
             return redirect(url_for('quickform.profile'))
-
+        
         return render_template(
             'profile.html',
             user=user_record or current_user,
@@ -733,7 +794,7 @@ def smart_analyze(task_id):
             return render_template('smart_analyze.html', task=task, error="请先在配置页面设置AI模型和API密钥", ai_config=ai_config, now=datetime.now(), model_label=None)
         
         model_label = MODEL_LABELS.get(ai_config.selected_model, ai_config.selected_model)
-
+        
         if ai_config.selected_model == 'chat_server':
             if not current_app.config.get('CHAT_SERVER_API_TOKEN'):
                 flash('当前使用默认 ChatServer 调用，建议在配置中设置专属 API Token（非必填）。', 'warning')
@@ -985,23 +1046,23 @@ def admin_panel():
             .all()
         )
         all_tasks = db.query(Task).order_by(Task.created_at.desc()).all()
-
+        
         total_users = db.query(User).count()
         admin_users = db.query(User).filter_by(role='admin').count()
         normal_users = db.query(User).filter_by(role='user').count()
         new_users_today = db.query(User).filter(User.created_at >= today_start).count()
-
+        
         total_tasks = db.query(Task).count()
         new_tasks_today = db.query(Task).filter(Task.created_at >= today_start).count()
         avg_tasks_per_user = total_tasks / total_users if total_users > 0 else 0
-
+        
         total_submissions = db.query(Submission).count()
         new_submissions_today = db.query(Submission).filter(Submission.submitted_at >= today_start).count()
         avg_submissions_per_task = total_submissions / total_tasks if total_tasks > 0 else 0
-
+        
         tasks_with_reports = db.query(Task).filter(Task.analysis_report.isnot(None)).count()
         report_generation_rate = (tasks_with_reports / total_tasks * 100) if total_tasks > 0 else 0
-
+        
         stats = {
             'total_users': total_users,
             'admin_users': admin_users,
@@ -1016,7 +1077,7 @@ def admin_panel():
             'tasks_with_reports': tasks_with_reports,
             'report_generation_rate': report_generation_rate
         }
-
+        
         return render_template(
             'admin.html',
             users=users,
@@ -1095,7 +1156,7 @@ def admin_review_html():
         tasks = db.query(Task).filter(Task.file_path.isnot(None)).filter(
             Task.file_path.like('%.html') | Task.file_path.like('%.htm')
         ).order_by(Task.created_at.desc()).all()
-
+        
         tasks_with_review = []
         pending_html_count = 0
         for task in tasks:
