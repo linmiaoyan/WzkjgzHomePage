@@ -1398,25 +1398,42 @@ def admin_review_html_action(task_id):
 def delete_submission(task_id):
     """删除单条提交数据"""
     db = SessionLocal()
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    submission_id = request.args.get('submission_id', type=int)
+    logger.info(
+        f"[delete_submission] user={getattr(current_user, 'id', None)} task={task_id} submission={submission_id} ip={client_ip}"
+    )
     try:
         task = db.get(Task, task_id)
         if not task or task.user_id != current_user.id:
+            logger.warning(
+                f"[delete_submission] forbidden user={getattr(current_user, 'id', None)} task={task_id}"
+            )
             return jsonify({'success': False, 'message': '无权访问此任务'}), 403
         
-        submission_id = request.args.get('submission_id', type=int)
         if not submission_id:
+            logger.warning(f"[delete_submission] missing submission_id task={task_id}")
             return jsonify({'success': False, 'message': '缺少提交ID'}), 400
         
         submission = db.query(Submission).filter_by(id=submission_id, task_id=task_id).first()
         if not submission:
+            logger.warning(
+                f"[delete_submission] submission_not_found task={task_id} submission={submission_id}"
+            )
             return jsonify({'success': False, 'message': '提交不存在'}), 404
         
         db.delete(submission)
         db.commit()
+        logger.info(
+            f"[delete_submission] success user={getattr(current_user, 'id', None)} task={task_id} submission={submission_id}"
+        )
         return jsonify({'success': True, 'message': '删除成功'})
     except Exception as e:
         db.rollback()
-        logger.error(f"删除提交数据失败: {str(e)}")
+        logger.error(
+            f"[delete_submission] error task={task_id} submission={submission_id} err={str(e)}",
+            exc_info=True
+        )
         return jsonify({'success': False, 'message': f'删除失败: {str(e)}'}), 500
     finally:
         db.close()
@@ -1426,21 +1443,35 @@ def delete_submission(task_id):
 def delete_all_submissions(task_id):
     """删除任务的所有提交数据"""
     db = SessionLocal()
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    logger.info(f"[delete_all_submissions] user={getattr(current_user, 'id', None)} task={task_id} ip={client_ip}")
     try:
         task = db.get(Task, task_id)
         if not task or task.user_id != current_user.id:
+            logger.warning(
+                f"[delete_all_submissions] forbidden user={getattr(current_user, 'id', None)} task={task_id}"
+            )
             return jsonify({'success': False, 'message': '无权访问此任务'}), 403
         
         submissions = db.query(Submission).filter_by(task_id=task_id).all()
         count = len(submissions)
+        logger.info(
+            f"[delete_all_submissions] deleting count={count} user={getattr(current_user, 'id', None)} task={task_id}"
+        )
         for submission in submissions:
             db.delete(submission)
         
         db.commit()
+        logger.info(
+            f"[delete_all_submissions] success user={getattr(current_user, 'id', None)} task={task_id} deleted={count}"
+        )
         return jsonify({'success': True, 'message': f'成功删除 {count} 条数据'})
     except Exception as e:
         db.rollback()
-        logger.error(f"删除所有提交数据失败: {str(e)}")
+        logger.error(
+            f"[delete_all_submissions] error task={task_id} err={str(e)}",
+            exc_info=True
+        )
         return jsonify({'success': False, 'message': f'删除失败: {str(e)}'}), 500
     finally:
         db.close()
