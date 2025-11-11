@@ -102,13 +102,7 @@
                     <label class="form-label"><strong>数据接口地址（URL）：</strong></label>
                     <div class="input-group">
                         <input type="text" class="form-control" readonly value="{{ request.host_url }}quickform/api/submit/{{ task.task_id }}" id="post-url">
-                        <button class="btn btn-outline-secondary" onclick="copyToClipboard('post-url')">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-clipboard" viewBox="0 0 16 16">
-                                <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                                <path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
-                            </svg>
-                            复制URL
-                        </button>
+                        <button class="btn btn-outline-secondary" onclick="copyToClipboard('post-url')">📋 复制URL</button>
                     </div>
                 </div>
                 
@@ -117,7 +111,7 @@
                     <label class="form-label"><strong>精简版提示词（点击复制）：</strong></label>
                     <div class="input-group">
                         <textarea class="form-control" id="simple-prompt-text" rows="3" readonly style="font-family: 'Courier New', monospace; font-size: 13px;">创建完应用后，向 '{{ request.host_url }}quickform/api/submit/{{ task.task_id }}' 发送post格式的json数据</textarea>
-                        <button class="btn btn-outline-primary" onclick="copyToClipboardText('simple-prompt-text')">复制</button>
+                        <button class="btn btn-outline-primary" onclick="copyToClipboardText('simple-prompt-text')">📋 复制</button>
                     </div>
                 </div>
                 
@@ -160,13 +154,7 @@ function sendTestData() {
     });
 }
 </script></textarea>
-                            <button class="btn btn-primary" onclick="copyToClipboardText('prompt-text')">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-clipboard-check" viewBox="0 0 16 16">
-                                    <path fill-rule="evenodd" d="M10.854 7.146a.5.5 0 0 1 0 .708l-3 3a.5.5 0 0 1-.708 0l-1.5-1.5a.5.5 0 1 1 .708-.708L7.5 9.793l2.646-2.647a.5.5 0 0 1 .708 0z"/>
-                                    <path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-                                </svg>
-                                复制提示词
-                            </button>
+                            <button class="btn btn-primary" onclick="copyToClipboardText('prompt-text')">📋 复制提示词</button>
                         </div>
                     </div>
                 </div>
@@ -178,13 +166,7 @@ function sendTestData() {
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">提交数据列表</h5>
                 {% if submissions %}
-                <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllData()">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-trash" viewBox="0 0 16 16">
-                        <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-                        <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-                    </svg>
-                    删除全部数据
-                </button>
+                <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllData()">🗑 删除全部数据</button>
                 {% endif %}
             </div>
             <div class="card-body">
@@ -218,11 +200,7 @@ function sendTestData() {
                                             type="button" 
                                             class="btn btn-sm btn-danger"
                                             onclick="deleteSingleData({{ sub.id }})">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" class="bi bi-trash" viewBox="0 0 16 16">
-                                                <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-                                                <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
-                                            </svg>
-                                            删除
+                                            🗑 删除
                                         </button>
                                     </div>
                                 </td>
@@ -236,6 +214,7 @@ function sendTestData() {
                 <div class="mt-4">
                     <p class="text-center mb-2">共 {{ total_submissions }} 条记录</p>
                     {% if pagination.pages > 1 %}
+                    {% set page_links = pagination.links if pagination.links is defined else range(1, pagination.pages + 1) %}
                     <nav aria-label="提交数据分页">
                         <ul class="pagination justify-content-center">
                             <li class="page-item {% if pagination.page <= 1 %}disabled{% endif %}">
@@ -243,10 +222,14 @@ function sendTestData() {
                                     <span aria-hidden="true">&laquo;</span>
                                 </a>
                             </li>
-                            {% for p in range(1, pagination.pages + 1) %}
-                            <li class="page-item {% if p == pagination.page %}active{% endif %}">
-                                <a class="page-link" href="{{ url_for('quickform.task_detail', task_id=task.id, page=p, per_page=pagination.per_page) }}">{{ p }}</a>
-                            </li>
+                            {% for p in page_links %}
+                                {% if p == '...' or p == 'ellipsis' %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% else %}
+                                <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                                    <a class="page-link" href="{{ url_for('quickform.task_detail', task_id=task.id, page=p, per_page=pagination.per_page) }}">{{ p }}</a>
+                                </li>
+                                {% endif %}
                             {% endfor %}
                             <li class="page-item {% if pagination.page >= pagination.pages %}disabled{% endif %}">
                                 <a class="page-link" href="{{ url_for('quickform.task_detail', task_id=task.id, page=pagination.page + 1, per_page=pagination.per_page) }}" aria-label="下一页">
@@ -276,41 +259,62 @@ function sendTestData() {
 
 {% block scripts %}
 <script>
-    function copyToClipboard(elementId) {
+    window.copyToClipboard = function copyToClipboard(elementId) {
         const element = document.getElementById(elementId);
+        if (!element) return;
         element.select();
         element.setSelectionRange(0, 99999);
         document.execCommand('copy');
-        
-        // 显示复制成功提示
+
         const btn = element.nextElementSibling;
+        if (!btn) return;
         const originalText = btn.innerHTML;
         btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-check" viewBox="0 0 16 16"><path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/></svg> 已复制';
-        
+
         setTimeout(() => {
             btn.innerHTML = originalText;
         }, 2000);
-    }
+    };
     
-    function copyToClipboardText(textareaId) {
-        const textarea = document.getElementById(textareaId);
+    window.copyToClipboardText = function copyToClipboardText(containerId) {
+        const container = document.getElementById(containerId);
+        let textarea = null;
+        let button = null;
+
+        if (container) {
+            if (container.tagName && container.tagName.toLowerCase() === 'textarea') {
+                textarea = container;
+                button = container.nextElementSibling;
+            } else {
+                textarea = container.querySelector('textarea');
+                button = container.querySelector('button');
+            }
+        } else {
+            const element = document.getElementById(containerId);
+            if (element && element.tagName && element.tagName.toLowerCase() === 'textarea') {
+                textarea = element;
+                button = element.nextElementSibling;
+            }
+        }
+
+        if (!textarea) return;
         textarea.select();
         textarea.setSelectionRange(0, 99999);
         document.execCommand('copy');
-        
-        // 显示复制成功提示
-        const btn = textarea.nextElementSibling;
+
+        const btn = button || (container ? container.querySelector('.btn-primary, .btn-success, .btn-outline-primary, .btn-outline-secondary') : null);
+        if (!btn) return;
         const originalText = btn.innerHTML;
         btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-check-circle" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M10.97 4.97a.235.235 0 0 0-.02.022L7.477 9.417 2.3 6.896a.235.235 0 0 0-.307.01l-.89.89a.5.5 0 0 0 .696.697l1.656-1.656a.235.235 0 0 0 .022-.023l3.473-4.425a.5.5 0 0 1 .703-.03l3.5 3.5a.5.5 0 0 1 .03.703z"/></svg> 已复制';
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-success');
-        
+
         setTimeout(() => {
             btn.innerHTML = originalText;
             btn.classList.remove('btn-success');
             btn.classList.add('btn-primary');
         }, 2000);
-    }
+    };
 
     // 单一全局模态框，避免滚动时出现多个悬浮窗
     (function ensureSingleModal(){
@@ -324,7 +328,7 @@ function sendTestData() {
                 <div class="modal-content" style="width:90%; height:90%; max-height:500px; max-width:900px; display:flex; flex-direction:column; background:white; margin:0; padding:0;">
                     <div class="modal-header" style="padding:10px 15px; border-bottom:1px solid #dee2e6; margin:0;">
                         <h5 id="singleDataModalTitle" class="modal-title" style="margin:0; font-size:16px;">提交数据详情</h5>
-                        <button type="button" class="btn-close" onclick="hideDataModal()" aria-label="Close"></button>
+                        <button type="button" class="btn" style="border:none; background:transparent; font-size:20px;" onclick="window.hideDataModal()" aria-label="Close">✖</button>
                     </div>
                     <div class="modal-body" style="padding:15px; flex-grow:1; overflow-y:auto; margin:0;">
                         <p style="margin:0 0 10px 0; font-size:14px;"><strong>提交时间：</strong><span id="singleDataModalTime"></span></p>
@@ -334,16 +338,16 @@ function sendTestData() {
                         </div>
                     </div>
                     <div class="modal-footer" style="padding:10px 15px; border-top:1px solid #dee2e6; justify-content:flex-end; margin:0;">
-                        <button type="button" class="btn btn-secondary" onclick="hideDataModal()">关闭</button>
+                        <button type="button" class="btn btn-secondary" onclick="window.hideDataModal()">关闭</button>
                     </div>
                 </div>
             </div>`;
         document.body.appendChild(modalWrap);
         // 点击遮罩关闭
-        modalWrap.firstElementChild.addEventListener('click', hideDataModal);
+        modalWrap.firstElementChild.addEventListener('click', window.hideDataModal);
     })();
 
-    function openDataModal(btn){
+    window.openDataModal = function openDataModal(btn){
         const wrap = document.getElementById('singleDataModal');
         if (!wrap) return;
         const id = btn.getAttribute('data-sub-id') || '';
@@ -354,11 +358,11 @@ function sendTestData() {
         document.getElementById('singleDataModalTime').textContent = t;
         document.getElementById('singleDataModalContent').textContent = d;
         wrap.style.display = 'block';
-    }
-    function hideDataModal(){
+    };
+    window.hideDataModal = function hideDataModal(){
         const wrap = document.getElementById('singleDataModal');
         if (wrap) wrap.style.display = 'none';
-    }
+    };
 
     // 删除单条数据
     window.deleteSingleData = function deleteSingleData(subId) {
@@ -372,7 +376,15 @@ function sendTestData() {
                 'Content-Type': 'application/json'
             }
         })
-        .then(response => response.json())
+        .then(async response => {
+            const text = await response.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { message: text }; }
+            if (!response.ok) {
+                throw new Error(data.message || data.error || `HTTP ${response.status}`);
+            }
+            return data;
+        })
         .then(data => {
             if (data.success) {
                 alert('删除成功');
@@ -385,7 +397,7 @@ function sendTestData() {
             console.error('Error:', error);
             alert('删除失败：' + error.message);
         });
-    }
+    };
     
     // 删除全部数据
     window.deleteAllData = function deleteAllData() {
@@ -399,7 +411,15 @@ function sendTestData() {
                 'Content-Type': 'application/json'
             }
         })
-        .then(response => response.json())
+        .then(async response => {
+            const text = await response.text();
+            let data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { message: text }; }
+            if (!response.ok) {
+                throw new Error(data.message || data.error || `HTTP ${response.status}`);
+            }
+            return data;
+        })
         .then(data => {
             if (data.success) {
                 alert('删除成功');
@@ -412,7 +432,7 @@ function sendTestData() {
             console.error('Error:', error);
             alert('删除失败：' + error.message);
         });
-    }
+    };
 </script>
 {% endblock %}
 {% endblock %}

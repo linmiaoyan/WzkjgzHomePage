@@ -288,7 +288,7 @@ def task_detail(task_id):
         if task.user_id != current_user.id:
             flash('无权访问此任务', 'danger')
             return redirect(url_for('quickform.dashboard'))
-
+        
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         if page < 1:
@@ -502,7 +502,7 @@ def submit_form(task_id):
         if ip_info['blacklist_until'] and now_ts < ip_info['blacklist_until']:
             logger.warning(f"IP {client_ip} 正在黑名单中，拒绝 task_id={task_id} 的提交")
             return _rate_limit_response(task_id, client_ip, now_ts, db)
-
+        
         # 获取提交的数据
         try:
             if request.is_json:
@@ -532,7 +532,7 @@ def submit_form(task_id):
                 f"IP {client_ip} 在 {SUBMIT_RATE_LIMIT_WINDOW}s 内提交 {len(events)} 次，已加入黑名单 {SUBMIT_BLACKLIST_DURATION}s"
             )
             return _rate_limit_response(task_id, client_ip, now_ts, db)
-
+        
         # 将数据转换为JSON字符串存储
         import json
         try:

@@ -338,15 +338,28 @@ def task_detail(task_id):
 
         submissions = query.offset((page - 1) * per_page).limit(per_page).all()
 
+        def build_page_links(current_page, total_page, radius=2):
+            links = []
+            for p in range(1, total_page + 1):
+                if p == 1 or p == total_page or abs(p - current_page) <= radius:
+                    links.append(p)
+                else:
+                    if links and links[-1] != '...':
+                        links.append('...')
+            return links
+
+        page_links = build_page_links(page, total_pages)
+
         saved_filename = task.file_path
         saved_filename = os.path.basename(saved_filename) if saved_filename else None
 
         pagination = {
             'page': page,
             'per_page': per_page,
-            'pages': total_pages
+            'pages': total_pages,
+            'links': page_links
         }
-
+ 
         return render_template(
             'task_detail.html',
             task=task,
