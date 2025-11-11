@@ -1393,7 +1393,7 @@ def admin_review_html_action(task_id):
     
     return redirect(url_for('quickform.admin_review_html'))
 
-@quickform_bp.route('/task/<int:task_id>/delete_submission', methods=['DELETE', 'GET'])
+@quickform_bp.route('/task/<int:task_id>/delete_submission', methods=['GET'])
 @login_required
 def delete_submission(task_id):
     """删除单条提交数据（支持DELETE与GET降级）"""
@@ -1408,7 +1408,7 @@ def delete_submission(task_id):
         return resp
 
     logger.info(
-        f"[delete_submission] method={request.method} user={getattr(current_user, 'id', None)} "
+        f"[delete_submission] GET user={getattr(current_user, 'id', None)} "
         f"task={task_id} submission={submission_id} ip={client_ip}"
     )
     try:
@@ -1446,7 +1446,7 @@ def delete_submission(task_id):
         db.close()
 
 
-@quickform_bp.route('/task/<int:task_id>/delete_all_submissions', methods=['DELETE', 'GET'])
+@quickform_bp.route('/task/<int:task_id>/delete_all_submissions', methods=['GET'])
 @login_required
 def delete_all_submissions(task_id):
     """删除任务的所有提交数据（支持DELETE与GET降级）"""
@@ -1460,7 +1460,7 @@ def delete_all_submissions(task_id):
         return resp
 
     logger.info(
-        f"[delete_all_submissions] method={request.method} user={getattr(current_user, 'id', None)} task={task_id} ip={client_ip}"
+        f"[delete_all_submissions] GET user={getattr(current_user, 'id', None)} task={task_id} ip={client_ip}"
     )
     try:
         task = db.get(Task, task_id)

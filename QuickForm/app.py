@@ -657,7 +657,7 @@ def admin_change_role(user_id):
         db.close()
     return redirect(url_for('admin_panel'))
 
-@app.route('/task/<int:task_id>/delete_submission', methods=['DELETE', 'GET'])
+@app.route('/task/<int:task_id>/delete_submission', methods=['GET'])
 @login_required
 def delete_submission(task_id):
     db = SessionLocal()
@@ -690,7 +690,7 @@ def delete_submission(task_id):
         db.close()
 
 
-@app.route('/task/<int:task_id>/delete_all_submissions', methods=['DELETE', 'GET'])
+@app.route('/task/<int:task_id>/delete_all_submissions', methods=['GET'])
 @login_required
 def delete_all_submissions(task_id):
     db = SessionLocal()
