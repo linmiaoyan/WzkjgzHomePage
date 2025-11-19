@@ -285,7 +285,8 @@ def task_detail(task_id):
         if not task:
             flash('任务不存在', 'danger')
             return redirect(url_for('quickform.dashboard'))
-        if task.user_id != current_user.id:
+        # 管理员可以查看所有任务，普通用户只能查看自己的任务
+        if task.user_id != current_user.id and not current_user.is_admin():
             flash('无权访问此任务', 'danger')
             return redirect(url_for('quickform.dashboard'))
         
@@ -851,6 +852,11 @@ def smart_analyze(task_id):
                 if task.file_path and os.path.exists(task.file_path):
                     file_content_for_prompt = read_file_content(task.file_path)
                 custom_prompt = generate_analysis_prompt(task, submission_for_prompt, file_content_for_prompt, SessionLocal, Submission)
+            
+            # 保存用户自定义的提示词
+            task.custom_prompt = custom_prompt
+            db.commit()
+            
             try:
                 # 后台线程执行，避免阻塞主请求线程
                 t = threading.Thread(target=perform_analysis_with_custom_prompt, args=(
@@ -865,13 +871,18 @@ def smart_analyze(task_id):
                 return render_template('smart_analyze.html', task=task, error=f'生成报告失败: {str(e)}', ai_config=ai_config, now=datetime.now(), model_label=model_label)
         
         # GET 或 POST 完成后，准备页面所需数据
-        # 刷新task对象以获取最新的html_analysis
+        # 刷新task对象以获取最新的html_analysis和custom_prompt
         db.refresh(task)
         submission = db.query(Submission).filter_by(task_id=task_id).all()
         file_content = None
         if task.file_path and os.path.exists(task.file_path):
             file_content = read_file_content(task.file_path)
-        preview_prompt = generate_analysis_prompt(task, submission, file_content, SessionLocal, Submission)
+        
+        # 优先使用保存的自定义提示词，如果没有则生成新的
+        if task.custom_prompt and task.custom_prompt.strip():
+            preview_prompt = task.custom_prompt
+        else:
+            preview_prompt = generate_analysis_prompt(task, submission, file_content, SessionLocal, Submission)
         report = task.analysis_report if task and task.analysis_report else None
 
         running_flag = request.args.get('running') == '1'
@@ -1054,10 +1065,14 @@ def admin_panel():
         today = datetime.now().date()
         today_start = datetime.combine(today, datetime.min.time())
         
-        page = request.args.get('page', 1, type=int)
-        if not page or page < 1:
-            page = 1
-        per_page = 20
+        # 获取当前标签页
+        current_tab = request.args.get('tab', 'users')
+        
+        # 用户列表分页
+        user_page = request.args.get('user_page', 1, type=int)
+        if not user_page or user_page < 1:
+            user_page = 1
+        user_per_page = 20
         search_keyword = (request.args.get('q') or '').strip()
 
         user_query = db.query(User)
@@ -1073,18 +1088,93 @@ def admin_panel():
             )
 
         total_filtered_users = user_query.count()
-        total_pages = max(math.ceil(total_filtered_users / per_page), 1) if total_filtered_users else 1
-        if page > total_pages:
-            page = total_pages
+        user_total_pages = max(math.ceil(total_filtered_users / user_per_page), 1) if total_filtered_users else 1
+        if user_page > user_total_pages:
+            user_page = user_total_pages
 
         users = (
             user_query
             .order_by(User.created_at.desc())
-            .offset((page - 1) * per_page)
-            .limit(per_page)
+            .offset((user_page - 1) * user_per_page)
+            .limit(user_per_page)
             .all()
         )
-        all_tasks = db.query(Task).order_by(Task.created_at.desc()).all()
+        
+        # 任务列表分页
+        task_page = request.args.get('task_page', 1, type=int)
+        if not task_page or task_page < 1:
+            task_page = 1
+        task_per_page = 20
+        
+        task_query = db.query(Task)
+        total_tasks = task_query.count()
+        task_total_pages = max(math.ceil(total_tasks / task_per_page), 1) if total_tasks else 1
+        if task_page > task_total_pages:
+            task_page = task_total_pages
+        
+        all_tasks = (
+            task_query
+            .order_by(Task.created_at.desc())
+            .offset((task_page - 1) * task_per_page)
+            .limit(task_per_page)
+            .all()
+        )
+        
+        # HTML审核数据
+        html_review_page = request.args.get('html_review_page', 1, type=int)
+        if not html_review_page or html_review_page < 1:
+            html_review_page = 1
+        html_review_per_page = 20
+        
+        html_tasks_query = db.query(Task).filter(Task.file_path.isnot(None)).filter(
+            Task.file_path.like('%.html') | Task.file_path.like('%.htm')
+        )
+        total_html_tasks = html_tasks_query.count()
+        html_review_total_pages = max(math.ceil(total_html_tasks / html_review_per_page), 1) if total_html_tasks else 1
+        if html_review_page > html_review_total_pages:
+            html_review_page = html_review_total_pages
+        
+        html_tasks = (
+            html_tasks_query
+            .order_by(Task.created_at.desc())
+            .offset((html_review_page - 1) * html_review_per_page)
+            .limit(html_review_per_page)
+            .all()
+        )
+        
+        html_tasks_with_review = []
+        pending_html_count = 0
+        for task in html_tasks:
+            author = db.get(User, task.user_id)
+            approver = db.get(User, task.html_approved_by) if task.html_approved_by else None
+            html_tasks_with_review.append({
+                'task': task,
+                'author': author,
+                'approver': approver
+            })
+            if task.html_approved != 1:
+                pending_html_count += 1
+        
+        # 认证审核数据
+        cert_review_page = request.args.get('cert_review_page', 1, type=int)
+        if not cert_review_page or cert_review_page < 1:
+            cert_review_page = 1
+        cert_review_per_page = 20
+        
+        cert_requests_query = db.query(CertificationRequest)
+        total_cert_requests = cert_requests_query.count()
+        cert_review_total_pages = max(math.ceil(total_cert_requests / cert_review_per_page), 1) if total_cert_requests else 1
+        if cert_review_page > cert_review_total_pages:
+            cert_review_page = cert_review_total_pages
+        
+        cert_requests = (
+            cert_requests_query
+            .order_by(CertificationRequest.created_at.desc())
+            .offset((cert_review_page - 1) * cert_review_per_page)
+            .limit(cert_review_per_page)
+            .all()
+        )
+        pending_cert_count = sum(1 for req in cert_requests if req.status == 0)
         
         total_users = db.query(User).count()
         admin_users = db.query(User).filter_by(role='admin').count()
@@ -1123,10 +1213,27 @@ def admin_panel():
             all_tasks=all_tasks,
             stats=stats,
             user_search=search_keyword,
-            user_page=page,
-            user_pages=total_pages,
+            user_page=user_page,
+            user_pages=user_total_pages,
             user_total=total_filtered_users,
-            user_per_page=per_page
+            user_per_page=user_per_page,
+            task_page=task_page,
+            task_pages=task_total_pages,
+            task_total=total_tasks,
+            task_per_page=task_per_page,
+            html_tasks_with_review=html_tasks_with_review,
+            pending_html_count=pending_html_count,
+            html_review_page=html_review_page,
+            html_review_pages=html_review_total_pages,
+            html_review_total=total_html_tasks,
+            html_review_per_page=html_review_per_page,
+            cert_requests=cert_requests,
+            pending_cert_count=pending_cert_count,
+            cert_review_page=cert_review_page,
+            cert_review_pages=cert_review_total_pages,
+            cert_review_total=total_cert_requests,
+            cert_review_per_page=cert_review_per_page,
+            current_tab=current_tab
         )
     finally:
         db.close()
@@ -1140,11 +1247,11 @@ def admin_change_role(user_id):
         user = db.get(User, user_id)
         if not user:
             flash('用户不存在', 'danger')
-            return redirect(url_for('quickform.admin_panel'))
+            return redirect(url_for('quickform.admin_panel', tab='users'))
         
         if user.id == current_user.id:
             flash('不能修改自己的角色', 'warning')
-            return redirect(url_for('quickform.admin_panel'))
+            return redirect(url_for('quickform.admin_panel', tab='users'))
         
         if user.role == 'admin':
             user.role = 'user'
@@ -1157,7 +1264,7 @@ def admin_change_role(user_id):
     finally:
         db.close()
     
-    return redirect(url_for('quickform.admin_panel'))
+    return redirect(url_for('quickform.admin_panel', tab='users'))
 
 @quickform_bp.route('/admin/set_task_limit/<int:user_id>', methods=['POST'])
 @admin_required
@@ -1168,15 +1275,15 @@ def admin_set_task_limit(user_id):
         user = db.get(User, user_id)
         if not user:
             flash('用户不存在', 'danger')
-            return redirect(url_for('quickform.admin_panel'))
+            return redirect(url_for('quickform.admin_panel', tab='users'))
         
         if user.id == current_user.id:
             flash('不能修改自己的任务上限', 'warning')
-            return redirect(url_for('quickform.admin_panel'))
+            return redirect(url_for('quickform.admin_panel', tab='users'))
         
         if user.role == 'admin':
             flash('管理员用户无需设置任务上限', 'warning')
-            return redirect(url_for('quickform.admin_panel'))
+            return redirect(url_for('quickform.admin_panel', tab='users'))
         
         user.task_limit = -1  # -1表示无限制
         db.commit()
@@ -1184,17 +1291,36 @@ def admin_set_task_limit(user_id):
     finally:
         db.close()
     
-    return redirect(url_for('quickform.admin_panel'))
+    return redirect(url_for('quickform.admin_panel', tab='users'))
 
 @quickform_bp.route('/admin/review_html')
 @admin_required
 def admin_review_html():
-    """审核中心：HTML页面与认证申请"""
+    """审核中心：HTML页面审核（仅HTML，认证审核已分离）"""
     db = SessionLocal()
     try:
-        tasks = db.query(Task).filter(Task.file_path.isnot(None)).filter(
+        page = request.args.get('page', 1, type=int)
+        if not page or page < 1:
+            page = 1
+        per_page = 20
+        
+        # 查询所有HTML任务
+        tasks_query = db.query(Task).filter(Task.file_path.isnot(None)).filter(
             Task.file_path.like('%.html') | Task.file_path.like('%.htm')
-        ).order_by(Task.created_at.desc()).all()
+        )
+        
+        total_tasks = tasks_query.count()
+        total_pages = max(math.ceil(total_tasks / per_page), 1) if total_tasks else 1
+        if page > total_pages:
+            page = total_pages
+        
+        tasks = (
+            tasks_query
+            .order_by(Task.created_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
         
         tasks_with_review = []
         pending_html_count = 0
@@ -1209,15 +1335,14 @@ def admin_review_html():
             if task.html_approved != 1:
                 pending_html_count += 1
 
-        cert_requests = db.query(CertificationRequest).order_by(CertificationRequest.created_at.desc()).all()
-        pending_cert_count = sum(1 for req in cert_requests if req.status == 0)
-
         return render_template(
-            'admin_review.html',
+            'admin_review_html.html',
             tasks_with_review=tasks_with_review,
             pending_html_count=pending_html_count,
-            cert_requests=cert_requests,
-            pending_cert_count=pending_cert_count
+            page=page,
+            pages=total_pages,
+            total=total_tasks,
+            per_page=per_page
         )
     finally:
         db.close()
@@ -1238,12 +1363,12 @@ def admin_review_html_batch():
 
         if not task_ids:
             flash('请选择至少一个待审核的任务', 'warning')
-            return redirect(url_for('quickform.admin_review_html'))
+            return redirect(url_for('quickform.admin_panel', tab='html-review'))
 
         tasks = db.query(Task).filter(Task.id.in_(task_ids)).all()
         if not tasks:
             flash('未找到所选任务', 'warning')
-            return redirect(url_for('quickform.admin_review_html'))
+            return redirect(url_for('quickform.admin_panel', tab='html-review'))
 
         updated_count = 0
         for task in tasks:
@@ -1267,6 +1392,8 @@ def admin_review_html_batch():
         flash(f'批量审核失败：{str(e)}', 'danger')
     finally:
         db.close()
+    
+    return redirect(url_for('quickform.admin_review_html'))
 
 
 @quickform_bp.route('/admin/certification/<int:request_id>/file')
@@ -1278,7 +1405,7 @@ def admin_view_certification_file(request_id):
         cert_request = db.get(CertificationRequest, request_id)
         if not cert_request or not cert_request.file_path or not os.path.exists(cert_request.file_path):
             flash('认证材料不存在或已被删除。', 'danger')
-            return redirect(url_for('quickform.admin_review_html'))
+            return redirect(url_for('quickform.admin_panel'))
         filename = os.path.basename(cert_request.file_path)
         try:
             return send_file(cert_request.file_path, download_name=filename, as_attachment=False)
@@ -1287,6 +1414,44 @@ def admin_view_certification_file(request_id):
     finally:
         db.close()
 
+
+@quickform_bp.route('/admin/review_certification')
+@admin_required
+def admin_review_certification():
+    """审核中心：教师认证审核（仅认证，HTML审核已分离）"""
+    db = SessionLocal()
+    try:
+        page = request.args.get('page', 1, type=int)
+        if not page or page < 1:
+            page = 1
+        per_page = 20
+        
+        cert_requests_query = db.query(CertificationRequest)
+        total_requests = cert_requests_query.count()
+        total_pages = max(math.ceil(total_requests / per_page), 1) if total_requests else 1
+        if page > total_pages:
+            page = total_pages
+        
+        cert_requests = (
+            cert_requests_query
+            .order_by(CertificationRequest.created_at.desc())
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+            .all()
+        )
+        pending_cert_count = sum(1 for req in cert_requests if req.status == 0)
+
+        return render_template(
+            'admin_review_certification.html',
+            cert_requests=cert_requests,
+            pending_cert_count=pending_cert_count,
+            page=page,
+            pages=total_pages,
+            total=total_requests,
+            per_page=per_page
+        )
+    finally:
+        db.close()
 
 @quickform_bp.route('/admin/certification/<int:request_id>', methods=['POST'])
 @admin_required
@@ -1300,17 +1465,17 @@ def admin_handle_certification(request_id):
         cert_request = db.get(CertificationRequest, request_id)
         if not cert_request:
             flash('认证申请不存在', 'danger')
-            return redirect(url_for('quickform.admin_review_html'))
+            return redirect(url_for('quickform.admin_panel', tab='cert-review'))
 
         user = cert_request.user
         if not user:
             flash('无法找到申请人信息', 'danger')
-            return redirect(url_for('quickform.admin_review_html'))
+            return redirect(url_for('quickform.admin_panel', tab='cert-review'))
 
         if action == 'approve':
             if cert_request.status == 1:
                 flash('该认证申请已通过审核', 'info')
-                return redirect(url_for('quickform.admin_review_html'))
+                return redirect(url_for('quickform.admin_panel', tab='cert-review'))
 
             cert_request.status = 1
             cert_request.reviewed_at = datetime.now()
@@ -1336,7 +1501,7 @@ def admin_handle_certification(request_id):
         elif action == 'reject':
             if cert_request.status == -1:
                 flash('该认证申请已被拒绝', 'info')
-                return redirect(url_for('quickform.admin_review_html'))
+                return redirect(url_for('quickform.admin_panel', tab='cert-review'))
 
             cert_request.status = -1
             cert_request.reviewed_at = datetime.now()
@@ -1353,7 +1518,7 @@ def admin_handle_certification(request_id):
     finally:
         db.close()
 
-    return redirect(url_for('quickform.admin_review_html'))
+    return redirect(url_for('quickform.admin_panel', tab='cert-review'))
 
 @quickform_bp.route('/admin/review_html/<int:task_id>', methods=['POST'])
 @admin_required
@@ -1364,7 +1529,7 @@ def admin_review_html_action(task_id):
         task = db.get(Task, task_id)
         if not task:
             flash('任务不存在', 'danger')
-            return redirect(url_for('quickform.admin_review_html'))
+            return redirect(url_for('quickform.admin_panel', tab='html-review'))
         
         action = request.form.get('action')  # 'approve' 或 'reject'
         note = (request.form.get('note') or '').strip()
@@ -1379,7 +1544,7 @@ def admin_review_html_action(task_id):
         elif action == 'reject':
             if not note:
                 flash('拒绝审核时需要填写原因。', 'danger')
-                return redirect(url_for('quickform.admin_review_html'))
+                return redirect(url_for('quickform.admin_panel', tab='html-review'))
             task.html_approved = -1
             task.html_approved_by = current_user.id
             task.html_approved_at = datetime.now()
@@ -1391,7 +1556,7 @@ def admin_review_html_action(task_id):
     finally:
         db.close()
     
-    return redirect(url_for('quickform.admin_review_html'))
+    return redirect(url_for('quickform.admin_panel', tab='html-review'))
 
 @quickform_bp.route('/task/<int:task_id>/submission/remove', methods=['GET'])
 @login_required
@@ -1421,14 +1586,14 @@ def remove_submission(task_id):
         if not submission_id:
             logger.warning(f"[remove_submission] missing submission_id task={task_id}")
             return make_response({'success': False, 'message': '缺少提交ID'}, 400)
-
+        
         submission = db.query(Submission).filter_by(id=submission_id, task_id=task_id).first()
         if not submission:
             logger.warning(
                 f"[remove_submission] submission_not_found task={task_id} submission={submission_id}"
             )
             return make_response({'success': False, 'message': '提交不存在'}, 404)
-
+        
         db.delete(submission)
         db.commit()
         logger.info(
@@ -1469,7 +1634,7 @@ def clear_all_submissions(task_id):
                 f"[clear_all_submissions] forbidden user={getattr(current_user, 'id', None)} task={task_id}"
             )
             return make_response({'success': False, 'message': '无权访问此任务'}, 403)
-
+        
         submissions = db.query(Submission).filter_by(task_id=task_id).all()
         count = len(submissions)
         logger.info(
@@ -1477,7 +1642,7 @@ def clear_all_submissions(task_id):
         )
         for submission in submissions:
             db.delete(submission)
-
+        
         db.commit()
         logger.info(
             f"[clear_all_submissions] success user={getattr(current_user, 'id', None)} task={task_id} deleted={count}"

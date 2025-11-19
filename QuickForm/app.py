@@ -281,7 +281,7 @@ def create_task():
     try:
         if not current_user.is_admin():
             if not current_user.can_create_task(SessionLocal, Task):
-                task_count = db.query(Task).filter_by(user_id=current_user.id).count()
+            task_count = db.query(Task).filter_by(user_id=current_user.id).count()
                 flash('您已达到任务数量上限（3个）。如需创建更多任务，请联系管理员：wzlinmiaoyan@163.com', 'warning')
                 return redirect(url_for('dashboard'))
         
@@ -320,7 +320,7 @@ def task_detail(task_id):
         if not task or task.user_id != current_user.id:
             flash('无权访问此任务', 'danger')
             return redirect(url_for('dashboard'))
-
+        
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 20, type=int)
         if page < 1:

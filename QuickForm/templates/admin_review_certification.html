@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block title %}教师认证审核 - QuickForm{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2 class="mb-0">教师认证审核</h2>
+            <a href="{{ url_for('quickform.admin_panel') }}" class="btn btn-secondary">返回管理面板</a>
+        </div>
+
+        <div class="alert alert-primary mb-4">
+            <strong>待审核教师认证：</strong> {{ pending_cert_count }}
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">教师认证审核</h5>
+            </div>
+            <div class="card-body">
+                {% if cert_requests %}
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle">
+                        <thead>
+                            <tr>
+                                <th>申请人</th>
+                                <th>学校</th>
+                                <th>提交时间</th>
+                                <th>状态</th>
+                                <th>审核时间</th>
+                                <th>材料</th>
+                                <th>审核备注</th>
+                                <th style="width: 220px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for req in cert_requests %}
+                            <tr>
+                                <td>{{ req.user.username if req.user else '未知用户' }}</td>
+                                <td>{{ req.user.school if req.user else '-' }}</td>
+                                <td>{{ req.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>
+                                    {% if req.status == 1 %}
+                                    <span class="badge bg-success">已通过</span>
+                                    {% elif req.status == -1 %}
+                                    <span class="badge bg-danger">已拒绝</span>
+                                    {% else %}
+                                    <span class="badge bg-warning text-dark">待审核</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if req.reviewed_at %}
+                                        {{ req.reviewed_at.strftime('%Y-%m-%d %H:%M') }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if req.file_path %}
+                                    <a class="btn btn-sm btn-outline-primary" href="{{ url_for('quickform.admin_view_certification_file', request_id=req.id) }}" target="_blank">查看材料</a>
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td>{{ req.review_note or '-' }}</td>
+                                <td>
+                                    {% if req.status == 0 %}
+                                    <form method="POST" action="{{ url_for('quickform.admin_handle_certification', request_id=req.id) }}" class="d-flex flex-column flex-sm-row gap-2 align-items-sm-center">
+                                        <input type="text" class="form-control form-control-sm" name="note" placeholder="备注（可选）">
+                                        <div class="btn-group">
+                                            <button type="submit" name="action" value="approve" class="btn btn-sm btn-success">通过</button>
+                                            <button type="submit" name="action" value="reject" class="btn btn-sm btn-danger" onclick="return confirm('确定要拒绝该认证申请吗？')">拒绝</button>
+                                        </div>
+                                    </form>
+                                    {% else %}
+                                    <span class="text-muted">—</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- 分页 -->
+                {% if pages > 1 %}
+                <nav aria-label="认证审核分页" class="mt-3">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('quickform.admin_review_certification', page=page-1) }}" aria-label="上一页">
+                                <span aria-hidden="true">&laquo;</span>
+                            </a>
+                        </li>
+                        {% for p in range(1, pages + 1) %}
+                        <li class="page-item {% if p == page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('quickform.admin_review_certification', page=p) }}">{{ p }}</a>
+                        </li>
+                        {% endfor %}
+                        <li class="page-item {% if page >= pages %}disabled{% endif %}">
+                            <a class="page-link" href="{{ url_for('quickform.admin_review_certification', page=page+1) }}" aria-label="下一页">
+                                <span aria-hidden="true">&raquo;</span>
+                            </a>
+                        </li>
+                    </ul>
+                </nav>
+                {% endif %}
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    暂无认证申请记录。
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

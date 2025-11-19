@@ -54,12 +54,24 @@
                 {% if task.file_name %}
                 <div class="mt-3">
                     <strong>⚠可以上传学生使用的html文件，以便模型更详细的分析，上传后可在互联网在线访问该页面：</strong>
-                    <a href="{{ url_for('quickform.uploaded_file', filename=saved_filename) }}" target="_blank" class="btn btn-outline-primary btn-sm">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark" viewBox="0 0 16 16">
-                            <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3-2A1.5 1.5 0 0 1 9.5 0H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5a1.5 1.5 0 0 1-1.5 1.5H11a1.5 1.5 0 0 1-1.5-1.5z"/>
-                        </svg>
-                        {{ task.file_name }}
-                    </a>
+                    <div class="d-flex align-items-center gap-2 mt-2">
+                        <a href="{{ url_for('quickform.uploaded_file', filename=saved_filename) }}" target="_blank" class="btn btn-outline-primary btn-sm">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-file-earmark" viewBox="0 0 16 16">
+                                <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3-2A1.5 1.5 0 0 1 9.5 0H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5a1.5 1.5 0 0 1-1.5 1.5H11a1.5 1.5 0 0 1-1.5-1.5z"/>
+                            </svg>
+                            {{ task.file_name }}
+                        </a>
+                        {% if task.html_approved == 1 %}
+                        <div class="position-relative">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleQRCode(this)" data-url="{{ url_for('quickform.uploaded_file', filename=saved_filename, _external=True) }}">
+                                📱 显示二维码
+                            </button>
+                            <div class="qr-code-container" style="display: none; position: absolute; top: 100%; left: 0; z-index: 1000; background: white; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-top: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+                                <div id="qrcode-{{ task.id }}"></div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
                     {% if task.html_approved == -1 %}
                     <div class="alert alert-danger mt-3" role="alert">
                         页面审核结果：已被拒绝。原因：{{ task.html_review_note or '管理员未提供原因' }}。
@@ -75,8 +87,13 @@
                 {% if task.rate_limit_log %}
                 <div class="mt-3">
                     <div class="alert alert-warning" role="alert">
-                        <strong>系统提醒：</strong> 检测到短时间内来自部分 IP 的异常提交，已自动暂时阻断。详情：
-                        <pre class="bg-light border mt-2 p-2 mb-0" style="white-space: pre-wrap; font-size: 0.9rem;">{{ task.rate_limit_log }}</pre>
+                        <button class="btn btn-sm btn-outline-warning float-end" type="button" data-bs-toggle="collapse" data-bs-target="#rateLimitDetails" aria-expanded="false">
+                            <span class="badge bg-warning text-dark" id="rateLimitBadge">0</span> 条封禁记录 ▼
+                        </button>
+                        <strong>系统提醒：</strong> 检测到短时间内来自部分 IP 的异常提交，已自动暂时阻断。
+                        <div class="collapse mt-2" id="rateLimitDetails">
+                            <div id="rateLimitContent" class="bg-light border p-2 rounded" style="font-size: 0.9rem;"></div>
+                        </div>
                     </div>
                 </div>
                 {% endif %}
@@ -258,7 +275,156 @@ function sendTestData() {
 </div>
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/qrcode.min.js') }}"></script>
 <script>
+    function toggleQRCode(btn) {
+        const container = btn.nextElementSibling;
+        const qrcodeDiv = container.querySelector('div[id^="qrcode-"]');
+        const url = btn.getAttribute('data-url');
+        
+        if (container.style.display === 'none' || container.style.display === '') {
+            container.style.display = 'block';
+            // 如果二维码还没有生成，则生成它
+            if (qrcodeDiv && !qrcodeDiv.hasAttribute('data-generated')) {
+                try {
+                    // 清空div内容（如果有的话）
+                    qrcodeDiv.innerHTML = '';
+                    // 使用构造函数方式生成二维码（最简单的形式）
+                    new QRCode(qrcodeDiv, url);
+                    qrcodeDiv.setAttribute('data-generated', 'true');
+                } catch (error) {
+                    console.error('生成二维码失败:', error);
+                    alert('生成二维码失败，请稍后重试');
+                    container.style.display = 'none';
+                }
+            }
+        } else {
+            container.style.display = 'none';
+        }
+    }
+    
+    // 点击外部关闭二维码
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.qr-code-container') && !e.target.closest('button[onclick*="toggleQRCode"]')) {
+            document.querySelectorAll('.qr-code-container').forEach(function(container) {
+                container.style.display = 'none';
+            });
+        }
+    });
+    
+    // 处理封禁通知显示
+    (function processRateLimitLog() {
+        const rateLimitLog = {{ task.rate_limit_log | tojson if task.rate_limit_log else 'null' }};
+        if (!rateLimitLog) return;
+        
+        const lines = rateLimitLog.split('\n').filter(l => l.trim());
+        const ipGroups = {};
+        const now = Math.floor(Date.now() / 1000);
+        const blacklistDuration = 600; // 10分钟
+        
+        lines.forEach(function(line) {
+            const match = line.match(/\[([^\]]+)\]\s*IP\s+([^\s]+)\s+在\s+(\d+)s\s+内多次提交，已暂时封禁\s+(\d+)\s+分钟/);
+            if (match) {
+                const timestamp = match[1];
+                const ip = match[2];
+                const windowSeconds = parseInt(match[3]);
+                const banMinutes = parseInt(match[4]);
+                
+                // 解析时间戳
+                const timeMatch = timestamp.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+                if (timeMatch) {
+                    const banTime = new Date(timestamp);
+                    const banTimestamp = Math.floor(banTime.getTime() / 1000);
+                    const expireTimestamp = banTimestamp + (banMinutes * 60);
+                    
+                    // 检查是否已过期
+                    if (expireTimestamp > now) {
+                        if (!ipGroups[ip]) {
+                            ipGroups[ip] = [];
+                        }
+                        ipGroups[ip].push({
+                            timestamp: timestamp,
+                            windowSeconds: windowSeconds,
+                            banMinutes: banMinutes,
+                            expireTimestamp: expireTimestamp
+                        });
+                    }
+                }
+            }
+        });
+        
+        const container = document.getElementById('rateLimitContent');
+        const badge = document.getElementById('rateLimitBadge');
+        if (!container) return;
+        
+        const activeCount = Object.keys(ipGroups).length;
+        if (badge) badge.textContent = activeCount;
+        
+        if (activeCount === 0) {
+            container.innerHTML = '<p class="text-muted mb-0">暂无活跃的封禁记录</p>';
+            return;
+        }
+        
+        let html = '';
+        Object.keys(ipGroups).forEach(function(ip) {
+            const records = ipGroups[ip];
+            const latest = records[records.length - 1];
+            const remainingSeconds = latest.expireTimestamp - now;
+            const remainingMinutes = Math.ceil(remainingSeconds / 60);
+            
+            html += '<div class="mb-2 p-2 border rounded">';
+            html += '<strong>IP: ' + ip + '</strong><br>';
+            html += '<small class="text-muted">封禁时间: ' + latest.timestamp + '</small><br>';
+            html += '<small class="text-danger">剩余时间: 约 ' + remainingMinutes + ' 分钟</small>';
+            if (records.length > 1) {
+                html += '<br><small class="text-muted">（该IP共有 ' + records.length + ' 条封禁记录）</small>';
+            }
+            html += '</div>';
+        });
+        
+        container.innerHTML = html;
+        
+        // 设置定时器，自动更新剩余时间
+        setInterval(function() {
+            const now = Math.floor(Date.now() / 1000);
+            const newIpGroups = {};
+            Object.keys(ipGroups).forEach(function(ip) {
+                const records = ipGroups[ip];
+                const latest = records[records.length - 1];
+                if (latest.expireTimestamp > now) {
+                    newIpGroups[ip] = records;
+                }
+            });
+            
+            if (Object.keys(newIpGroups).length !== Object.keys(ipGroups).length) {
+                // 有记录过期，重新渲染
+                processRateLimitLog();
+            } else {
+                // 更新剩余时间显示
+                const container = document.getElementById('rateLimitContent');
+                if (container) {
+                    let html = '';
+                    Object.keys(ipGroups).forEach(function(ip) {
+                        const records = ipGroups[ip];
+                        const latest = records[records.length - 1];
+                        const remainingSeconds = latest.expireTimestamp - now;
+                        const remainingMinutes = Math.ceil(remainingSeconds / 60);
+                        
+                        html += '<div class="mb-2 p-2 border rounded">';
+                        html += '<strong>IP: ' + ip + '</strong><br>';
+                        html += '<small class="text-muted">封禁时间: ' + latest.timestamp + '</small><br>';
+                        html += '<small class="text-danger">剩余时间: 约 ' + remainingMinutes + ' 分钟</small>';
+                        if (records.length > 1) {
+                            html += '<br><small class="text-muted">（该IP共有 ' + records.length + ' 条封禁记录）</small>';
+                        }
+                        html += '</div>';
+                    });
+                    container.innerHTML = html;
+                }
+            }
+        }, 60000); // 每分钟更新一次
+    })();
+    
     window.copyToClipboard = function copyToClipboard(elementId) {
         const element = document.getElementById(elementId);
         if (!element) return;

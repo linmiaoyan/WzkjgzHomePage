@@ -79,6 +79,7 @@ class Task(Base):
     html_approved_at = Column(DateTime, nullable=True)  # 审核时间
     html_review_note = Column(Text)
     rate_limit_log = Column(Text)
+    custom_prompt = Column(Text)  # 用户自定义的分析提示词
     approver = relationship('User', foreign_keys=[html_approved_by], backref='approved_tasks')
 
 
@@ -129,6 +130,7 @@ def migrate_database(engine):
         columns = [col['name'] for col in inspector.get_columns('user')]
         ai_cfg_cols = [col['name'] for col in inspector.get_columns('ai_config')] if 'ai_config' in inspector.get_table_names() else []
         task_cols = [col['name'] for col in inspector.get_columns('task')] if 'task' in inspector.get_table_names() else []
+        cert_req_cols = [col['name'] for col in inspector.get_columns('certification_request')] if 'certification_request' in inspector.get_table_names() else []
         
         with engine.begin() as conn:
             if 'school' not in columns:
@@ -237,6 +239,13 @@ def migrate_database(engine):
                     logger.info("成功为task添加rate_limit_log字段")
                 except Exception as e:
                     logger.warning(f"添加rate_limit_log失败（可能已存在）: {str(e)}")
+            
+            if task_cols and 'custom_prompt' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN custom_prompt TEXT"))
+                    logger.info("成功为task添加custom_prompt字段")
+                except Exception as e:
+                    logger.warning(f"添加custom_prompt失败（可能已存在）: {str(e)}")
 
             # 创建认证申请表
             if 'certification_request' not in inspector.get_table_names():
