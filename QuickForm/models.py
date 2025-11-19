@@ -80,6 +80,7 @@ class Task(Base):
     html_review_note = Column(Text)
     rate_limit_log = Column(Text)
     custom_prompt = Column(Text)  # 用户自定义的分析提示词
+    is_featured = Column(Boolean, default=False)  # 是否加精
     approver = relationship('User', foreign_keys=[html_approved_by], backref='approved_tasks')
 
 
@@ -246,6 +247,13 @@ def migrate_database(engine):
                     logger.info("成功为task添加custom_prompt字段")
                 except Exception as e:
                     logger.warning(f"添加custom_prompt失败（可能已存在）: {str(e)}")
+            
+            if task_cols and 'is_featured' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN is_featured BOOLEAN DEFAULT 0"))
+                    logger.info("成功为task添加is_featured字段")
+                except Exception as e:
+                    logger.warning(f"添加is_featured失败（可能已存在）: {str(e)}")
 
             # 创建认证申请表
             if 'certification_request' not in inspector.get_table_names():

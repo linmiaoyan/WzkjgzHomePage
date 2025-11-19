@@ -66,8 +66,8 @@
                             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleQRCode(this)" data-url="{{ url_for('quickform.uploaded_file', filename=saved_filename, _external=True) }}">
                                 📱 显示二维码
                             </button>
-                            <div class="qr-code-container" style="display: none; position: absolute; top: 100%; left: 0; z-index: 1000; background: white; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-top: 5px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-                                <div id="qrcode-{{ task.id }}"></div>
+                            <div class="qr-code-container" style="display: none; position: relative; z-index: 10; background: white; padding: 16px; border: 1px solid #ddd; border-radius: 8px; margin-top: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.15); max-width: 360px;">
+                                <div id="qrcode-{{ task.id }}" style="width: 360px; height: 360px;"></div>
                             </div>
                         </div>
                         {% endif %}
@@ -289,8 +289,15 @@ function sendTestData() {
                 try {
                     // 清空div内容（如果有的话）
                     qrcodeDiv.innerHTML = '';
-                    // 使用构造函数方式生成二维码（最简单的形式）
-                    new QRCode(qrcodeDiv, url);
+                    // 使用更大的尺寸生成二维码
+                    new QRCode(qrcodeDiv, {
+                        text: url,
+                        width: 360,
+                        height: 360,
+                        colorDark: '#000000',
+                        colorLight: '#ffffff',
+                        correctLevel: QRCode.CorrectLevel.H
+                    });
                     qrcodeDiv.setAttribute('data-generated', 'true');
                 } catch (error) {
                     console.error('生成二维码失败:', error);

@@ -348,6 +348,15 @@
                                                         </form>
                                                         {% endif %}
                                                     </div>
+                                                    {% if item.task.html_approved == 1 %}
+                                                    <form method="POST" action="{{ url_for('quickform.admin_review_html_action', task_id=item.task.id) }}" class="d-inline">
+                                                        {% if item.task.is_featured %}
+                                                        <button type="submit" name="action" value="unfeature" class="btn btn-sm btn-warning">取消加精</button>
+                                                        {% else %}
+                                                        <button type="submit" name="action" value="feature" class="btn btn-sm btn-info">加精</button>
+                                                        {% endif %}
+                                                    </form>
+                                                    {% endif %}
                                                     {% if item.task.html_approved != -1 %}
                                                     <form method="POST" action="{{ url_for('quickform.admin_review_html_action', task_id=item.task.id) }}" class="d-flex gap-2 align-items-center">
                                                         <input type="text" name="note" class="form-control form-control-sm" placeholder="拒绝原因" required>

@@ -5,6 +5,7 @@ QuickForm Blueprint
 import os
 import json
 import math
+import random
 import threading
 import html
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file, send_from_directory, current_app
@@ -60,7 +61,7 @@ if not os.path.exists(CERTIFICATION_FOLDER):
     os.makedirs(CERTIFICATION_FOLDER)
 
 # 允许的文件扩展名
-ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'zip'}
+ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'zip', 'txt'}
 
 # 数据库配置（相对于QuickForm目录）
 DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
@@ -109,7 +110,48 @@ def index():
     """QuickForm首页"""
     if current_user.is_authenticated:
         return redirect(url_for('quickform.dashboard'))
-    return render_template('home.html')
+    
+    # 获取加精项目（已通过审核且有文件的任务）
+    db = SessionLocal()
+    try:
+        featured_tasks = db.query(Task).filter(
+            Task.is_featured == True,
+            Task.html_approved == 1,
+            Task.file_path.isnot(None),
+            Task.file_path != ''
+        ).order_by(Task.created_at.desc()).limit(10).all()
+        
+        # 随机选择3个加精项目
+        if len(featured_tasks) >= 3:
+            featured_tasks = random.sample(featured_tasks, 3)
+        elif len(featured_tasks) > 0:
+            # 如果不足3个，重复使用已有的
+            while len(featured_tasks) < 3:
+                featured_tasks.append(random.choice(featured_tasks))
+        
+        # 为每个任务生成文件URL
+        featured_data = []
+        for task in featured_tasks:
+            if task.file_path:
+                filename = task.file_path.replace('\\', '/').split('/')[-1]
+                file_url = url_for('quickform.uploaded_file', filename=filename, _external=True)
+                featured_data.append({
+                    'task': task,
+                    'file_url': file_url,
+                    'filename': filename
+                })
+        
+        # 确保有3个数据（如果不足，用None填充）
+        while len(featured_data) < 3:
+            featured_data.append(None)
+            
+    except Exception as e:
+        logger.error(f"获取加精项目失败: {str(e)}")
+        featured_data = [None, None, None]
+    finally:
+        db.close()
+    
+    return render_template('home.html', featured_data=featured_data)
 
 @quickform_bp.route('/register', methods=['GET', 'POST'])
 def register():
@@ -1531,8 +1573,19 @@ def admin_review_html_action(task_id):
             flash('任务不存在', 'danger')
             return redirect(url_for('quickform.admin_panel', tab='html-review'))
         
-        action = request.form.get('action')  # 'approve' 或 'reject'
+        action = request.form.get('action')
         note = (request.form.get('note') or '').strip()
+        
+        # 处理加精/取消加精操作
+        if action == 'feature' or action == 'unfeature':
+            if action == 'feature':
+                task.is_featured = True
+                flash('已标记为加精项目', 'success')
+            else:
+                task.is_featured = False
+                flash('已取消加精标记', 'info')
+            db.commit()
+            return redirect(url_for('quickform.admin_panel', tab='html-review'))
         
         if action == 'approve':
             task.html_approved = 1
