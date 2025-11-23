@@ -27,7 +27,7 @@ from typing import Deque
 
 # 导入分离的模块
 from models import Base, User, Task, Submission, AIConfig, migrate_database, CertificationRequest
-from file_service import save_uploaded_file, read_file_content, ALLOWED_EXTENSIONS
+from file_service import save_uploaded_file, read_file_content, ALLOWED_EXTENSIONS, allowed_file
 from ai_service import call_ai_model, generate_analysis_prompt, analyze_html_file
 from report_service import (
     save_analysis_report, generate_report_image, perform_analysis_with_custom_prompt,
@@ -275,6 +275,11 @@ def create_task():
             
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
+                # 检查文件扩展名
+                if not allowed_file(file.filename):
+                    flash(f'不支持的文件格式。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}', 'danger')
+                    return redirect(url_for('quickform.create_task'))
+                
                 unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
                 if unique_filename:
                     task.file_name = file.filename
@@ -290,6 +295,10 @@ def create_task():
                             task.html_approved_by = None
                             task.html_approved_at = None
                             task.html_review_note = None
+                else:
+                    flash(f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB', 'danger')
+                    logger.error(f"文件上传失败: {file.filename}, 用户: {current_user.id}")
+                    return redirect(url_for('quickform.create_task'))
             
             db.add(task)
             db.commit()
@@ -406,6 +415,11 @@ def edit_task(task_id):
             
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
+                # 检查文件扩展名
+                if not allowed_file(file.filename):
+                    flash(f'不支持的文件格式。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}', 'danger')
+                    return redirect(url_for('quickform.edit_task', task_id=task.id))
+                
                 unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
                 if unique_filename:
                     if task.file_path and os.path.exists(task.file_path):
@@ -426,6 +440,10 @@ def edit_task(task_id):
                             task.html_review_note = None
                         task.html_analysis = None  # 清空旧的分析结果
                         analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                else:
+                    flash(f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB', 'danger')
+                    logger.error(f"文件上传失败: {file.filename}, 用户: {current_user.id}, 任务: {task.id}")
+                    return redirect(url_for('quickform.edit_task', task_id=task.id))
             elif remove_file:
                 if task.file_path and os.path.exists(task.file_path):
                     os.remove(task.file_path)

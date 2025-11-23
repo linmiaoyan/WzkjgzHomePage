@@ -18,13 +18,32 @@ def allowed_file(filename):
 def save_uploaded_file(file, upload_folder):
     """保存上传的文件"""
     try:
-        if file and allowed_file(file.filename):
-            unique_filename = str(uuid.uuid4()) + '_' + file.filename
-            filepath = os.path.join(upload_folder, unique_filename)
-            file.save(filepath)
-            return unique_filename, filepath
+        if not file:
+            logger.warning("save_uploaded_file: file对象为空")
+            return None, None
+        
+        if not file.filename:
+            logger.warning("save_uploaded_file: 文件名为空")
+            return None, None
+        
+        if not allowed_file(file.filename):
+            file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else '无扩展名'
+            logger.warning(f"save_uploaded_file: 不支持的文件格式 - {file.filename}, 扩展名: {file_ext}, 允许的格式: {ALLOWED_EXTENSIONS}")
+            return None, None
+        
+        unique_filename = str(uuid.uuid4()) + '_' + file.filename
+        filepath = os.path.join(upload_folder, unique_filename)
+        
+        # 确保上传目录存在
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+            logger.info(f"创建上传目录: {upload_folder}")
+        
+        file.save(filepath)
+        logger.info(f"文件保存成功: {file.filename} -> {unique_filename}")
+        return unique_filename, filepath
     except Exception as e:
-        logger.error(f"保存文件失败: {str(e)}")
+        logger.error(f"保存文件失败: {str(e)}, 文件名: {file.filename if file else 'None'}", exc_info=True)
     return None, None
 
 
