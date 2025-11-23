@@ -1053,11 +1053,14 @@ def uploaded_file(filename):
                 db.close()
             return send_from_directory(UPLOAD_FOLDER, filename)
         else:
-            # 非HTML文件需要登录
+            # TXT 文件开放访问，便于公网直接查看
+            if filename.lower().endswith('.txt'):
+                return send_from_directory(UPLOAD_FOLDER, filename)
+            # 其他非 HTML 文件仍需登录保护
             if not current_user.is_authenticated:
                 flash('请先登录', 'warning')
                 return redirect(url_for('quickform.login'))
-        return send_from_directory(UPLOAD_FOLDER, filename)
+            return send_from_directory(UPLOAD_FOLDER, filename)
     except FileNotFoundError:
         flash('文件不存在', 'danger')
         return redirect(request.referrer or url_for('quickform.dashboard'))
