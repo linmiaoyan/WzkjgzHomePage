@@ -10,6 +10,8 @@ from functools import lru_cache
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key_here'  # 设置session密钥
+# 设置最大文件上传大小为16MB
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # 添加全局响应头处理器，确保所有响应都使用UTF-8编码

@@ -12,7 +12,23 @@ ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'zip', 'txt'}
 
 def allowed_file(filename):
     """检查文件扩展名是否允许"""
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    if not filename or '.' not in filename:
+        logger.warning(f"allowed_file: 文件名无效或没有扩展名 - {filename}")
+        return False
+    
+    # 获取扩展名并转换为小写，去除可能的空白字符
+    ext = filename.rsplit('.', 1)[1].lower().strip()
+    # 去除可能的BOM或其他隐藏字符
+    ext = ext.replace('\ufeff', '').replace('\u200b', '').strip()
+    
+    result = ext in ALLOWED_EXTENSIONS
+    if not result:
+        # 记录详细信息，包括文件名的原始字节表示
+        filename_bytes = filename.encode('utf-8', errors='replace') if filename else b''
+        logger.warning(f"allowed_file: 扩展名不在允许列表中 - 文件名: {filename}, 扩展名: '{ext}' (原始字节: {filename_bytes[-10:]}), 允许的格式: {ALLOWED_EXTENSIONS}")
+    else:
+        logger.info(f"allowed_file: 文件格式检查通过 - 文件名: {filename}, 扩展名: '{ext}'")
+    return result
 
 
 def save_uploaded_file(file, upload_folder):
@@ -31,7 +47,18 @@ def save_uploaded_file(file, upload_folder):
             logger.warning(f"save_uploaded_file: 不支持的文件格式 - {file.filename}, 扩展名: {file_ext}, 允许的格式: {ALLOWED_EXTENSIONS}")
             return None, None
         
-        unique_filename = str(uuid.uuid4()) + '_' + file.filename
+        # 处理文件名，确保编码正确
+        original_filename = file.filename
+        # 如果文件名包含非ASCII字符，尝试安全处理
+        try:
+            # 确保文件名可以安全保存
+            safe_filename = original_filename.encode('utf-8').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError) as e:
+            logger.warning(f"文件名编码问题: {original_filename}, 错误: {str(e)}")
+            # 如果编码失败，使用原始文件名
+            safe_filename = original_filename
+        
+        unique_filename = str(uuid.uuid4()) + '_' + safe_filename
         filepath = os.path.join(upload_folder, unique_filename)
         
         # 确保上传目录存在
@@ -39,9 +66,19 @@ def save_uploaded_file(file, upload_folder):
             os.makedirs(upload_folder)
             logger.info(f"创建上传目录: {upload_folder}")
         
+        # 记录详细信息用于调试
+        logger.info(f"准备保存文件 - 原始文件名: {original_filename}, 安全文件名: {safe_filename}, 扩展名: {original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else '无'}, 目标路径: {filepath}")
+        
         file.save(filepath)
-        logger.info(f"文件保存成功: {file.filename} -> {unique_filename}")
-        return unique_filename, filepath
+        
+        # 验证文件是否真的保存成功
+        if os.path.exists(filepath):
+            file_size = os.path.getsize(filepath)
+            logger.info(f"文件保存成功: {original_filename} -> {unique_filename}, 大小: {file_size} 字节")
+            return unique_filename, filepath
+        else:
+            logger.error(f"文件保存后验证失败: 文件不存在于 {filepath}")
+            return None, None
     except Exception as e:
         logger.error(f"保存文件失败: {str(e)}, 文件名: {file.filename if file else 'None'}", exc_info=True)
     return None, None

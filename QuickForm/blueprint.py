@@ -275,9 +275,17 @@ def create_task():
             
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
+                filename = file.filename
+                
+                # 记录详细信息用于调试
+                logger.info(f"收到文件上传请求 - 文件名: {filename}, 用户: {current_user.id}, Content-Type: {file.content_type}")
+                
                 # 检查文件扩展名
-                if not allowed_file(file.filename):
-                    flash(f'不支持的文件格式。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}', 'danger')
+                if not allowed_file(filename):
+                    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else '无扩展名'
+                    error_msg = f'不支持的文件格式: {file_ext}。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}'
+                    logger.warning(f"文件格式检查失败 - 文件名: {filename}, 扩展名: {file_ext}, 用户: {current_user.id}")
+                    flash(error_msg, 'danger')
                     return redirect(url_for('quickform.create_task'))
                 
                 unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
@@ -296,8 +304,9 @@ def create_task():
                             task.html_approved_at = None
                             task.html_review_note = None
                 else:
-                    flash(f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB', 'danger')
-                    logger.error(f"文件上传失败: {file.filename}, 用户: {current_user.id}")
+                    error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB'
+                    logger.error(f"文件上传失败 - 文件名: {file.filename}, 用户: {current_user.id}, 文件大小: {request.content_length if hasattr(request, 'content_length') else '未知'}")
+                    flash(error_msg, 'danger')
                     return redirect(url_for('quickform.create_task'))
             
             db.add(task)
