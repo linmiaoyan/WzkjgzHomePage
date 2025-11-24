@@ -1317,8 +1317,11 @@ def admin_panel():
             html_review_page = 1
         html_review_per_page = 20
         
-        html_tasks_query = db.query(Task).filter(Task.file_path.isnot(None)).filter(
-            Task.file_path.like('%.html') | Task.file_path.like('%.htm')
+        # 查询所有HTML任务 - 使用file_name字段匹配更可靠
+        html_tasks_query = db.query(Task).filter(
+            Task.file_path.isnot(None),
+            Task.file_name.isnot(None),
+            (Task.file_name.like('%.html') | Task.file_name.like('%.htm'))
         )
         total_html_tasks = html_tasks_query.count()
         html_review_total_pages = max(math.ceil(total_html_tasks / html_review_per_page), 1) if total_html_tasks else 1
@@ -1495,9 +1498,11 @@ def admin_review_html():
             page = 1
         per_page = 20
         
-        # 查询所有HTML任务
-        tasks_query = db.query(Task).filter(Task.file_path.isnot(None)).filter(
-            Task.file_path.like('%.html') | Task.file_path.like('%.htm')
+        # 查询所有HTML任务 - 使用file_name字段匹配更可靠
+        tasks_query = db.query(Task).filter(
+            Task.file_path.isnot(None),
+            Task.file_name.isnot(None),
+            (Task.file_name.like('%.html') | Task.file_name.like('%.htm'))
         )
         
         total_tasks = tasks_query.count()
