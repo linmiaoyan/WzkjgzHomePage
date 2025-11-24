@@ -99,73 +99,31 @@
         }
     }
     
-    // 表单提交拦截，如果有文件则使用XMLHttpRequest
+    // 表单提交处理 - 使用传统表单提交（避免公网AJAX拦截）
     document.getElementById('edit-task-form').addEventListener('submit', function(e) {
         const fileInput = document.getElementById('html-file-input-edit');
         const file = fileInput.files[0];
+        const submitBtn = document.getElementById('submit-btn');
         
-        // 如果有文件，使用AJAX上传
+        // 检查文件大小
         if (file && file.size > 0) {
-            e.preventDefault();
+            if (file.size > 16 * 1024 * 1024) {
+                e.preventDefault();
+                alert('文件大小超过16MB限制');
+                return false;
+            }
             
-            const form = this;
-            const formData = new FormData(form);
-            const submitBtn = document.getElementById('submit-btn');
-            const originalText = submitBtn.textContent;
-            
-            // 显示上传状态
+            // 显示上传状态（但不阻止表单提交）
             submitBtn.disabled = true;
-            submitBtn.textContent = '上传中...';
+            submitBtn.textContent = '上传中，请稍候...';
             
-            const xhr = new XMLHttpRequest();
-            xhr.timeout = 60000;
-            xhr.open('POST', form.action, true);
-            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-            
-            xhr.addEventListener('load', function() {
-                if (xhr.status === 200) {
-                    try {
-                        const contentType = xhr.getResponseHeader('content-type');
-                        if (contentType && contentType.includes('application/json')) {
-                            const data = JSON.parse(xhr.responseText);
-                            if (data.success) {
-                                window.location.href = '{{ url_for("quickform.task_detail", task_id=task.id) }}';
-                                return;
-                            } else {
-                                throw new Error(data.message || '保存失败');
-                            }
-                        } else {
-                            window.location.href = '{{ url_for("quickform.task_detail", task_id=task.id) }}';
-                            return;
-                        }
-                    } catch (err) {
-                        alert('保存失败：' + (err.message || '未知错误'));
-                        submitBtn.disabled = false;
-                        submitBtn.textContent = originalText;
-                    }
-                } else {
-                    alert('保存失败，HTTP状态码: ' + xhr.status);
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = originalText;
-                }
-            });
-            
-            xhr.addEventListener('error', function() {
-                alert('网络错误，保存失败。请检查网络连接后重试。');
-                submitBtn.disabled = false;
-                submitBtn.textContent = originalText;
-            });
-            
-            xhr.addEventListener('timeout', function() {
-                alert('请求超时，请检查网络连接后重试。');
-                submitBtn.disabled = false;
-                submitBtn.textContent = originalText;
-            });
-            
-            xhr.send(formData);
-            return false;
+            // 允许传统表单提交，不使用AJAX
+            // 这样可以避免公网环境下的连接重置问题
+            return true;
         }
-        // 如果没有文件，使用正常表单提交
+        
+        // 如果没有文件，正常提交
+        return true;
     });
 </script>
 {% endblock %}
