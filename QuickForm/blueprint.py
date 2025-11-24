@@ -273,113 +273,41 @@ def create_task():
             
             task = Task(title=title, description=description, user_id=current_user.id)
             
-            if 'file' in request.files and request.files['file'].filename != '':
-                file = request.files['file']
-                filename = file.filename
-                content_length = request.headers.get('Content-Length', '未知')
-                client_ip = request.headers.get('X-Forwarded-For', request.headers.get('X-Real-IP', request.remote_addr))
-                
-                # 输出文件接收情况到终端
-                print(f"\n{'='*60}")
-                print(f"[文件上传请求] 收到文件上传请求")
-                print(f"  文件名: {filename}")
-                print(f"  用户ID: {current_user.id}")
-                print(f"  用户名: {current_user.username}")
-                print(f"  客户端IP: {client_ip}")
-                print(f"  Content-Length: {content_length}")
-                print(f"  请求路径: {request.path}")
-                print(f"{'='*60}\n")
-                logger.info(f"[文件上传] 收到请求 - 文件名: {filename}, 用户: {current_user.id} ({current_user.username}), IP: {client_ip}, 大小: {content_length}")
-                
-                # 检查Content-Length是否超过限制
-                try:
-                    if content_length and content_length != '未知':
-                        content_length_int = int(content_length)
-                        max_size = 16 * 1024 * 1024  # 16MB
-                        if content_length_int > max_size:
-                            error_msg = f'文件大小超过限制（{content_length_int / 1024 / 1024:.2f}MB > 16MB）'
-                            print(f"[文件上传] ❌ 文件大小超限: {content_length_int / 1024 / 1024:.2f}MB")
-                            logger.warning(f"文件大小超限 - 文件名: {filename}, 大小: {content_length_int}, 用户: {current_user.id}")
-                            flash(error_msg, 'danger')
-                            return redirect(url_for('quickform.create_task'))
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"无法解析Content-Length: {content_length}, 错误: {str(e)}")
-                
-                # 检查文件扩展名
-                if not allowed_file(filename):
-                    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else '无扩展名'
-                    error_msg = f'不支持的文件格式: {file_ext}。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}'
-                    print(f"[文件上传] ❌ 文件格式不允许: {file_ext}")
-                    logger.warning(f"文件格式检查失败 - 文件名: {filename}, 扩展名: {file_ext}, 用户: {current_user.id}")
-                    flash(error_msg, 'danger')
+            # 使用与认证文件上传相同的简单逻辑
+            file = request.files.get('file')
+            if file and file.filename.strip():
+                unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
+                if not unique_filename:
+                    flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
                     return redirect(url_for('quickform.create_task'))
                 
-                print(f"[文件上传] ✓ 文件格式验证通过: {filename.rsplit('.', 1)[1].lower() if '.' in filename else '无扩展名'}")
-                unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
-                if unique_filename:
-                    file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-                    print(f"[文件上传] ✓ 文件保存成功")
-                    print(f"  原始文件名: {file.filename}")
-                    print(f"  保存文件名: {unique_filename}")
-                    print(f"  文件大小: {file_size / 1024:.2f} KB ({file_size} 字节)")
-                    print(f"  保存路径: {filepath}")
-                    logger.info(f"[文件上传] 保存成功 - {file.filename} -> {unique_filename}, 大小: {file_size} 字节")
-                    
-                    task.file_name = file.filename
-                    task.file_path = filepath
-                    if filepath.lower().endswith(('.html', '.htm')) and getattr(current_user, 'is_certified', False):
+                task.file_name = file.filename
+                task.file_path = filepath
+                
+                # 如果是HTML文件，设置审核状态
+                if filepath.lower().endswith(('.html', '.htm')):
+                    if getattr(current_user, 'is_certified', False):
                         task.html_approved = 1
                         task.html_approved_by = current_user.id
                         task.html_approved_at = datetime.now()
                         task.html_review_note = None
-                        print(f"[文件上传] ✓ HTML文件已自动审核通过（认证用户）")
                     else:
-                        if filepath.lower().endswith(('.html', '.htm')):
-                            task.html_approved = 0
-                            task.html_approved_by = None
-                            task.html_approved_at = None
-                            task.html_review_note = None
-                            print(f"[文件上传] ⏳ HTML文件待审核")
-                    print(f"{'='*60}\n")
-                else:
-                    print(f"[文件上传] ❌ 文件保存失败")
-                    print(f"  文件名: {file.filename}")
-                    print(f"{'='*60}\n")
-                    # 检查是否是413错误（请求实体过大）
-                    if hasattr(request, 'content_length') and request.content_length:
-                        content_length_mb = request.content_length / 1024 / 1024
-                        if content_length_mb > 16:
-                            error_msg = f'文件上传失败：文件大小({content_length_mb:.2f}MB)超过限制(16MB)。如果文件确实小于16MB，可能是反向代理（如Nginx）的client_max_body_size设置过小，请联系管理员检查服务器配置。'
-                        else:
-                            error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB。如果问题持续，可能是网络问题或反向代理配置问题。'
-                    else:
-                        error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB。如果问题持续，可能是网络问题或反向代理配置问题。'
-                    
-                    logger.error(f"文件上传失败 - 文件名: {file.filename}, 用户: {current_user.id}, "
-                               f"Content-Length: {request.headers.get('Content-Length', '未知') if request else '未知'}, "
-                               f"客户端IP: {request.headers.get('X-Forwarded-For', request.remote_addr) if request else '未知'}, "
-                               f"请求路径: {request.path if request else '未知'}")
-                    flash(error_msg, 'danger')
-                    return redirect(url_for('quickform.create_task'))
+                        task.html_approved = 0
+                        task.html_approved_by = None
+                        task.html_approved_at = None
+                        task.html_review_note = None
             
             db.add(task)
             db.commit()
             
-            print(f"[文件上传] ✓ 任务已保存到数据库，任务ID: {task.id}")
-            
             # 如果是HTML文件，在任务保存后自动在后台分析
             if task.file_path and task.file_path.lower().endswith(('.html', '.htm')):
                 try:
-                    print(f"[文件上传] → 启动HTML文件后台分析，任务ID: {task.id}")
                     analyze_html_file(task.id, current_user.id, task.file_path, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
-                    print(f"[文件上传] ✓ HTML文件后台分析任务已启动")
                 except Exception as e:
-                    # 后台分析失败不应影响文件上传成功
-                    print(f"[文件上传] ⚠ HTML文件后台分析启动失败（不影响上传）: {str(e)}")
                     logger.error(f"启动HTML文件分析失败: {str(e)}", exc_info=True)
             
             flash('数据任务创建成功', 'success')
-            print(f"[文件上传] ✓ 准备重定向到任务详情页，任务ID: {task.id}\n")
             return redirect(url_for('quickform.task_detail', task_id=task.id))
         
         # GET 渲染创建页面
@@ -478,9 +406,6 @@ def edit_task(task_id):
             return redirect(url_for('quickform.dashboard'))
         
         if request.method == 'POST':
-            # 检测是否是AJAX请求
-            is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-            
             title = request.form.get('title')
             description = request.form.get('description')
             remove_file = request.form.get('remove_file')
@@ -488,115 +413,40 @@ def edit_task(task_id):
             task.title = title
             task.description = description
             
-            if 'file' in request.files and request.files['file'].filename != '':
-                file = request.files['file']
-                filename = file.filename
-                content_length = request.headers.get('Content-Length', '未知')
-                client_ip = request.headers.get('X-Forwarded-For', request.headers.get('X-Real-IP', request.remote_addr))
-                
-                # 输出文件接收情况到终端
-                print(f"\n{'='*60}")
-                print(f"[文件上传请求(编辑)] 收到文件上传请求")
-                print(f"  文件名: {filename}")
-                print(f"  任务ID: {task.id}")
-                print(f"  用户ID: {current_user.id}")
-                print(f"  用户名: {current_user.username}")
-                print(f"  客户端IP: {client_ip}")
-                print(f"  Content-Length: {content_length}")
-                print(f"  AJAX请求: {is_ajax}")
-                print(f"{'='*60}\n")
-                logger.info(f"[文件上传(编辑)] 收到请求 - 文件名: {filename}, 任务: {task.id}, 用户: {current_user.id} ({current_user.username}), IP: {client_ip}, 大小: {content_length}, AJAX: {is_ajax}")
-                
-                # 检查Content-Length是否超过限制
-                try:
-                    if content_length and content_length != '未知':
-                        content_length_int = int(content_length)
-                        max_size = 16 * 1024 * 1024  # 16MB
-                        if content_length_int > max_size:
-                            error_msg = f'文件大小超过限制（{content_length_int / 1024 / 1024:.2f}MB > 16MB）'
-                            print(f"[文件上传(编辑)] ❌ 文件大小超限: {content_length_int / 1024 / 1024:.2f}MB")
-                            logger.warning(f"文件大小超限(编辑) - 文件名: {filename}, 大小: {content_length_int}, 用户: {current_user.id}")
-                            if is_ajax:
-                                return jsonify({'success': False, 'message': error_msg}), 400
-                            flash(error_msg, 'danger')
-                            return redirect(url_for('quickform.edit_task', task_id=task.id))
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"无法解析Content-Length: {content_length}, 错误: {str(e)}")
-                
-                # 检查文件扩展名
-                if not allowed_file(filename):
-                    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else '无扩展名'
-                    error_msg = f'不支持的文件格式: {file_ext}。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}'
-                    print(f"[文件上传(编辑)] ❌ 文件格式不允许: {file_ext}")
-                    logger.warning(f"文件格式检查失败(编辑) - 文件名: {filename}, 扩展名: {file_ext}, 用户: {current_user.id}")
-                    if is_ajax:
-                        return jsonify({'success': False, 'message': error_msg}), 400
-                    flash(error_msg, 'danger')
-                    return redirect(url_for('quickform.edit_task', task_id=task.id))
-                
-                print(f"[文件上传(编辑)] ✓ 文件格式验证通过: {filename.rsplit('.', 1)[1].lower() if '.' in filename else '无扩展名'}")
-                
+            # 使用与认证文件上传相同的简单逻辑
+            file = request.files.get('file')
+            if file and file.filename.strip():
                 unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
-                if unique_filename:
-                    file_size = os.path.getsize(filepath) if os.path.exists(filepath) else 0
-                    print(f"[文件上传(编辑)] ✓ 文件保存成功")
-                    print(f"  原始文件名: {file.filename}")
-                    print(f"  保存文件名: {unique_filename}")
-                    print(f"  文件大小: {file_size / 1024:.2f} KB ({file_size} 字节)")
-                    print(f"  保存路径: {filepath}")
-                    logger.info(f"[文件上传(编辑)] 保存成功 - {file.filename} -> {unique_filename}, 大小: {file_size} 字节")
-                    
-                    if task.file_path and os.path.exists(task.file_path):
-                        os.remove(task.file_path)
-                        print(f"[文件上传(编辑)] ✓ 已删除旧文件: {task.file_path}")
-                    task.file_name = file.filename
-                    task.file_path = filepath
-                    # 如果是HTML文件，自动在后台分析
-                    if filepath.lower().endswith(('.html', '.htm')):
-                        if getattr(current_user, 'is_certified', False):
-                            task.html_approved = 1
-                            task.html_approved_by = current_user.id
-                            task.html_approved_at = datetime.now()
-                            task.html_review_note = None
-                            print(f"[文件上传(编辑)] ✓ HTML文件已自动审核通过（认证用户）")
-                        else:
-                            task.html_approved = 0
-                            task.html_approved_by = None
-                            task.html_approved_at = None
-                            task.html_review_note = None
-                            print(f"[文件上传(编辑)] ⏳ HTML文件待审核")
-                        task.html_analysis = None  # 清空旧的分析结果
-                        try:
-                            print(f"[文件上传(编辑)] → 启动HTML文件后台分析，任务ID: {task.id}")
-                            analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
-                            print(f"[文件上传(编辑)] ✓ HTML文件后台分析任务已启动")
-                        except Exception as e:
-                            # 后台分析失败不应影响文件上传成功
-                            print(f"[文件上传(编辑)] ⚠ HTML文件后台分析启动失败（不影响上传）: {str(e)}")
-                            logger.error(f"启动HTML文件分析失败(编辑): {str(e)}", exc_info=True)
-                    print(f"{'='*60}\n")
-                    
-                    # 提交数据库更改
-                    db.commit()
-                    
-                    # 如果是AJAX请求，返回JSON响应
-                    if is_ajax:
-                        return jsonify({
-                            'success': True,
-                            'message': '文件上传成功',
-                            'filename': file.filename,
-                            'file_size': file_size
-                        })
-                else:
-                    print(f"[文件上传(编辑)] ❌ 文件保存失败")
-                    print(f"  文件名: {file.filename}")
-                    print(f"{'='*60}\n")
-                    error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB'
-                    logger.error(f"文件上传失败: {file.filename}, 用户: {current_user.id}, 任务: {task.id}")
-                    if is_ajax:
-                        return jsonify({'success': False, 'message': error_msg}), 400
-                    flash(error_msg, 'danger')
+                if not unique_filename:
+                    flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
                     return redirect(url_for('quickform.edit_task', task_id=task.id))
+                
+                # 删除旧文件
+                if task.file_path and os.path.exists(task.file_path):
+                    os.remove(task.file_path)
+                
+                task.file_name = file.filename
+                task.file_path = filepath
+                
+                # 如果是HTML文件，设置审核状态
+                if filepath.lower().endswith(('.html', '.htm')):
+                    if getattr(current_user, 'is_certified', False):
+                        task.html_approved = 1
+                        task.html_approved_by = current_user.id
+                        task.html_approved_at = datetime.now()
+                        task.html_review_note = None
+                    else:
+                        task.html_approved = 0
+                        task.html_approved_by = None
+                        task.html_approved_at = None
+                        task.html_review_note = None
+                    task.html_analysis = None  # 清空旧的分析结果
+                    
+                    # 后台分析（不影响上传成功）
+                    try:
+                        analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                    except Exception as e:
+                        logger.error(f"启动HTML文件分析失败(编辑): {str(e)}", exc_info=True)
             elif remove_file:
                 if task.file_path and os.path.exists(task.file_path):
                     os.remove(task.file_path)
