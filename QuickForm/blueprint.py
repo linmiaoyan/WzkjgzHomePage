@@ -8,6 +8,9 @@ import math
 import random
 import threading
 import html
+import base64
+import uuid
+from urllib.parse import unquote_plus
 from flask import Blueprint, render_template, redirect, url_for, request, flash, jsonify, make_response, send_file, send_from_directory, current_app
 from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
@@ -62,6 +65,31 @@ if not os.path.exists(CERTIFICATION_FOLDER):
 
 # 允许的文件扩展名（仅HTML格式）
 ALLOWED_EXTENSIONS = {'html', 'htm'}
+
+def parse_urlencoded(raw_data):
+    """手动解析URL编码的表单数据，避免Flask自动解析导致的问题"""
+    result = {}
+    if not raw_data:
+        return result
+    
+    try:
+        # 将bytes转为字符串
+        if isinstance(raw_data, bytes):
+            data_str = raw_data.decode('utf-8', errors='ignore')
+        else:
+            data_str = raw_data
+        
+        # 按&分割字段
+        for pair in data_str.split('&'):
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                key = unquote_plus(key)
+                value = unquote_plus(value)
+                result[key] = value
+    except Exception as e:
+        logger.error(f"解析URL编码数据失败: {str(e)}")
+    
+    return result
 
 # 数据库配置（相对于QuickForm目录）
 DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
@@ -273,29 +301,74 @@ def create_task():
             
             task = Task(title=title, description=description, user_id=current_user.id)
             
-            # 使用与认证文件上传相同的简单逻辑
-            file = request.files.get('file')
-            if file and file.filename.strip():
-                unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
-                if not unique_filename:
-                    flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
+            # 优先检查Base64上传（用于公网环境）
+            file_content_base64 = request.form.get('file_content_base64')
+            file_name_base64 = request.form.get('file_name')
+            
+            if file_content_base64 and file_name_base64:
+                # Base64上传方式
+                try:
+                    # 解码Base64
+                    file_content = base64.b64decode(file_content_base64).decode('utf-8')
+                    
+                    # 验证文件扩展名
+                    if not allowed_file(file_name_base64, ALLOWED_EXTENSIONS):
+                        flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
+                        return redirect(url_for('quickform.create_task'))
+                    
+                    # 保存文件
+                    unique_filename = str(uuid.uuid4()) + '_' + file_name_base64
+                    filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
+                    
+                    if not os.path.exists(UPLOAD_FOLDER):
+                        os.makedirs(UPLOAD_FOLDER)
+                    
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(file_content)
+                    
+                    task.file_name = file_name_base64
+                    task.file_path = filepath
+                    
+                    # 如果是HTML文件，设置审核状态
+                    if filepath.lower().endswith(('.html', '.htm')):
+                        if getattr(current_user, 'is_certified', False):
+                            task.html_approved = 1
+                            task.html_approved_by = current_user.id
+                            task.html_approved_at = datetime.now()
+                            task.html_review_note = None
+                        else:
+                            task.html_approved = 0
+                            task.html_approved_by = None
+                            task.html_approved_at = None
+                            task.html_review_note = None
+                except Exception as e:
+                    logger.error(f"Base64文件上传失败: {str(e)}", exc_info=True)
+                    flash('文件上传失败，请重试。', 'danger')
                     return redirect(url_for('quickform.create_task'))
-                
-                task.file_name = file.filename
-                task.file_path = filepath
-                
-                # 如果是HTML文件，设置审核状态
-                if filepath.lower().endswith(('.html', '.htm')):
-                    if getattr(current_user, 'is_certified', False):
-                        task.html_approved = 1
-                        task.html_approved_by = current_user.id
-                        task.html_approved_at = datetime.now()
-                        task.html_review_note = None
-                    else:
-                        task.html_approved = 0
-                        task.html_approved_by = None
-                        task.html_approved_at = None
-                        task.html_review_note = None
+            else:
+                # 传统文件上传方式（向后兼容）
+                file = request.files.get('file')
+                if file and file.filename.strip():
+                    unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
+                    if not unique_filename:
+                        flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
+                        return redirect(url_for('quickform.create_task'))
+                    
+                    task.file_name = file.filename
+                    task.file_path = filepath
+                    
+                    # 如果是HTML文件，设置审核状态
+                    if filepath.lower().endswith(('.html', '.htm')):
+                        if getattr(current_user, 'is_certified', False):
+                            task.html_approved = 1
+                            task.html_approved_by = current_user.id
+                            task.html_approved_at = datetime.now()
+                            task.html_review_note = None
+                        else:
+                            task.html_approved = 0
+                            task.html_approved_by = None
+                            task.html_approved_at = None
+                            task.html_review_note = None
             
             db.add(task)
             db.commit()
@@ -413,41 +486,97 @@ def edit_task(task_id):
             task.title = title
             task.description = description
             
-            # 使用与认证文件上传相同的简单逻辑
-            file = request.files.get('file')
-            if file and file.filename.strip():
-                unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
-                if not unique_filename:
-                    flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
-                    return redirect(url_for('quickform.edit_task', task_id=task.id))
-                
-                # 删除旧文件
-                if task.file_path and os.path.exists(task.file_path):
-                    os.remove(task.file_path)
-                
-                task.file_name = file.filename
-                task.file_path = filepath
-                
-                # 如果是HTML文件，设置审核状态
-                if filepath.lower().endswith(('.html', '.htm')):
-                    if getattr(current_user, 'is_certified', False):
-                        task.html_approved = 1
-                        task.html_approved_by = current_user.id
-                        task.html_approved_at = datetime.now()
-                        task.html_review_note = None
-                    else:
-                        task.html_approved = 0
-                        task.html_approved_by = None
-                        task.html_approved_at = None
-                        task.html_review_note = None
-                    task.html_analysis = None  # 清空旧的分析结果
+            # 优先检查Base64上传（用于公网环境）
+            file_content_base64 = request.form.get('file_content_base64')
+            file_name_base64 = request.form.get('file_name')
+            
+            if file_content_base64 and file_name_base64:
+                # Base64上传方式
+                try:
+                    # 解码Base64
+                    file_content = base64.b64decode(file_content_base64).decode('utf-8')
                     
-                    # 后台分析（不影响上传成功）
-                    try:
-                        analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
-                    except Exception as e:
-                        logger.error(f"启动HTML文件分析失败(编辑): {str(e)}", exc_info=True)
-            elif remove_file:
+                    # 验证文件扩展名
+                    if not allowed_file(file_name_base64, ALLOWED_EXTENSIONS):
+                        flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
+                        return redirect(url_for('quickform.edit_task', task_id=task.id))
+                    
+                    # 删除旧文件
+                    if task.file_path and os.path.exists(task.file_path):
+                        os.remove(task.file_path)
+                    
+                    # 保存文件
+                    unique_filename = str(uuid.uuid4()) + '_' + file_name_base64
+                    filepath = os.path.join(UPLOAD_FOLDER, unique_filename)
+                    
+                    if not os.path.exists(UPLOAD_FOLDER):
+                        os.makedirs(UPLOAD_FOLDER)
+                    
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(file_content)
+                    
+                    task.file_name = file_name_base64
+                    task.file_path = filepath
+                    
+                    # 如果是HTML文件，设置审核状态
+                    if filepath.lower().endswith(('.html', '.htm')):
+                        if getattr(current_user, 'is_certified', False):
+                            task.html_approved = 1
+                            task.html_approved_by = current_user.id
+                            task.html_approved_at = datetime.now()
+                            task.html_review_note = None
+                        else:
+                            task.html_approved = 0
+                            task.html_approved_by = None
+                            task.html_approved_at = None
+                            task.html_review_note = None
+                        task.html_analysis = None  # 清空旧的分析结果
+                        
+                        # 后台分析（不影响上传成功）
+                        try:
+                            analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                        except Exception as e:
+                            logger.error(f"启动HTML文件分析失败(编辑): {str(e)}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Base64文件上传失败: {str(e)}", exc_info=True)
+                    flash('文件上传失败，请重试。', 'danger')
+                    return redirect(url_for('quickform.edit_task', task_id=task.id))
+            else:
+                # 传统文件上传方式（向后兼容）
+                file = request.files.get('file')
+                if file and file.filename.strip():
+                    unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
+                    if not unique_filename:
+                        flash('文件上传失败或格式不支持，请重试。允许的格式：HTML/HTM，最大16MB。', 'danger')
+                        return redirect(url_for('quickform.edit_task', task_id=task.id))
+                    
+                    # 删除旧文件
+                    if task.file_path and os.path.exists(task.file_path):
+                        os.remove(task.file_path)
+                    
+                    task.file_name = file.filename
+                    task.file_path = filepath
+                    
+                    # 如果是HTML文件，设置审核状态
+                    if filepath.lower().endswith(('.html', '.htm')):
+                        if getattr(current_user, 'is_certified', False):
+                            task.html_approved = 1
+                            task.html_approved_by = current_user.id
+                            task.html_approved_at = datetime.now()
+                            task.html_review_note = None
+                        else:
+                            task.html_approved = 0
+                            task.html_approved_by = None
+                            task.html_approved_at = None
+                            task.html_review_note = None
+                        task.html_analysis = None  # 清空旧的分析结果
+                        
+                        # 后台分析（不影响上传成功）
+                        try:
+                            analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                        except Exception as e:
+                            logger.error(f"启动HTML文件分析失败(编辑): {str(e)}", exc_info=True)
+            if remove_file:
                 if task.file_path and os.path.exists(task.file_path):
                     os.remove(task.file_path)
                 task.file_name = None
@@ -455,13 +584,6 @@ def edit_task(task_id):
                 task.html_review_note = None
             
             db.commit()
-            
-            # 如果是AJAX请求，返回JSON响应
-            if is_ajax:
-                return jsonify({
-                    'success': True,
-                    'message': '任务更新成功'
-                })
             
             flash('任务更新成功', 'success')
             return redirect(url_for('quickform.task_detail', task_id=task.id))

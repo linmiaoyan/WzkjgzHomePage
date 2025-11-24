@@ -99,30 +99,76 @@
         }
     }
     
-    // 表单提交处理 - 使用传统表单提交（避免公网AJAX拦截）
+    // 表单提交处理 - 使用Base64编码上传（避免公网multipart解析问题）
     document.getElementById('edit-task-form').addEventListener('submit', function(e) {
         const fileInput = document.getElementById('html-file-input-edit');
         const file = fileInput.files[0];
         const submitBtn = document.getElementById('submit-btn');
         
-        // 检查文件大小
-        if (file && file.size > 0) {
+        // 如果有HTML文件，使用Base64编码上传
+        if (file && (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm'))) {
+            e.preventDefault();
+            
+            // 检查文件大小
             if (file.size > 16 * 1024 * 1024) {
-                e.preventDefault();
                 alert('文件大小超过16MB限制');
                 return false;
             }
             
-            // 显示上传状态（但不阻止表单提交）
+            // 显示上传状态
             submitBtn.disabled = true;
             submitBtn.textContent = '上传中，请稍候...';
             
-            // 允许传统表单提交，不使用AJAX
-            // 这样可以避免公网环境下的连接重置问题
-            return true;
+            // 读取文件为文本并编码为Base64
+            const reader = new FileReader();
+            
+            reader.onerror = function() {
+                alert('文件读取失败');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '保存修改';
+            };
+            
+            reader.onload = function(e) {
+                // 将文本内容编码为Base64
+                const fileContent = e.target.result;
+                const base64Content = btoa(unescape(encodeURIComponent(fileContent)));
+                
+                // 创建隐藏的表单字段
+                const form = document.getElementById('edit-task-form');
+                
+                // 移除旧的Base64字段（如果存在）
+                const oldBase64Input = document.getElementById('file_content_base64_edit');
+                const oldFileNameInput = document.getElementById('file_name_edit');
+                if (oldBase64Input) oldBase64Input.remove();
+                if (oldFileNameInput) oldFileNameInput.remove();
+                
+                // 添加新的Base64字段
+                const base64Input = document.createElement('input');
+                base64Input.type = 'hidden';
+                base64Input.id = 'file_content_base64_edit';
+                base64Input.name = 'file_content_base64';
+                base64Input.value = base64Content;
+                form.appendChild(base64Input);
+                
+                const fileNameInput = document.createElement('input');
+                fileNameInput.type = 'hidden';
+                fileNameInput.id = 'file_name_edit';
+                fileNameInput.name = 'file_name';
+                fileNameInput.value = file.name;
+                form.appendChild(fileNameInput);
+                
+                // 清空文件输入，避免multipart上传
+                fileInput.value = '';
+                
+                // 提交表单
+                form.submit();
+            };
+            
+            reader.readAsText(file, 'UTF-8');
+            return false;
         }
         
-        // 如果没有文件，正常提交
+        // 如果没有文件或不是HTML文件，正常提交
         return true;
     });
 </script>
