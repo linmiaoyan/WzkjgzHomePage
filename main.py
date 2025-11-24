@@ -210,6 +210,25 @@ def bad_request(error):
             return '', 400
     return 'Bad Request', 400
 
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    """处理413错误（请求实体过大）- 通常是反向代理限制"""
+    app.logger.warning(f"413错误 - 请求实体过大，路径: {request.path if request else '未知'}, "
+                     f"Content-Length: {request.headers.get('Content-Length', '未知') if request else '未知'}")
+    if request and request.path.startswith('/quickform'):
+        from flask import flash, redirect, url_for
+        flash('文件上传失败：文件大小超过服务器限制。请检查反向代理（如Nginx）的client_max_body_size配置，建议设置为至少20M。', 'danger')
+        if request.path.startswith('/quickform/create_task'):
+            return redirect(url_for('quickform.create_task'))
+        elif '/edit_task' in request.path:
+            # 尝试从路径中提取task_id
+            try:
+                task_id = int(request.path.split('/edit_task/')[1].split('/')[0])
+                return redirect(url_for('quickform.edit_task', task_id=task_id))
+            except:
+                return redirect(url_for('quickform.dashboard'))
+    return 'Request Entity Too Large', 413
+
 @app.errorhandler(404)
 def not_found(error):
     """处理404错误，避免后台线程中的静态文件请求错误"""
@@ -220,9 +239,9 @@ def not_found(error):
             # 如果是静态文件请求但文件不存在，静默处理
             if path.startswith('/static/') or path.startswith('/favicon.ico'):
                 return '', 404
-            # 如果是其他404，记录但不影响后台任务
+            # 如果是其他404，静默处理
             if not path.startswith('/quickform/api/'):  # API请求的404不记录
-                app.logger.debug(f'404 Not Found: {path}')
+                pass
     except RuntimeError:
         # 在请求上下文外（如后台线程），静默处理
         pass
@@ -258,7 +277,7 @@ def handle_exception(error):
 
 if __name__ == '__main__':
     # 生产环境配置
-    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
-    #debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'false'
+    #debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'false'
 
     socketio.run(app, host='0.0.0.0', port=80, debug=debug_mode)

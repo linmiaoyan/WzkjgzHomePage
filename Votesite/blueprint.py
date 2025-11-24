@@ -18,6 +18,9 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase.pdfutils import ImageReader
 from reportlab.lib.pagesizes import A4
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 import threading
 import queue
 import atexit
@@ -73,7 +76,7 @@ def db_worker(app):
                 func(*args, **kwargs)
                 submit_queue.task_done()
             except Exception as e:
-                print(f"[ERROR] 数据库写入失败: {e}")
+                logger.error(f"数据库写入失败: {e}", exc_info=True)
 
 def save_vote_to_db(vote_data):
     """保存投票到数据库"""
@@ -102,7 +105,7 @@ def save_vote_to_db(vote_data):
         
         session.commit()
     except Exception as e:
-        print(f"[ERROR] 数据库写入异常: user_id={vote_data['user_id']}, survey_id={vote_data['survey_id']}, 错误: {e}")
+        logger.error(f"数据库写入异常: user_id={vote_data['user_id']}, survey_id={vote_data['survey_id']}, 错误: {e}", exc_info=True)
         submit_queue.put((save_vote_to_db, (vote_data,), {}))
         time.sleep(0.5)
     finally:
@@ -833,5 +836,5 @@ def init_votesite(app, login_manager_instance=None):
     # 启动数据库写入工作线程
     threading.Thread(target=lambda: db_worker(app), daemon=True).start()
     
-    print("VoteSite Blueprint 初始化完成")
+    logger.info("VoteSite Blueprint 初始化完成")
 

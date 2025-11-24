@@ -277,8 +277,18 @@ def create_task():
                 file = request.files['file']
                 filename = file.filename
                 
-                # 记录详细信息用于调试
-                logger.info(f"收到文件上传请求 - 文件名: {filename}, 用户: {current_user.id}, Content-Type: {file.content_type}")
+                # 检查Content-Length是否超过限制
+                try:
+                    if content_length and content_length != '未知':
+                        content_length_int = int(content_length)
+                        max_size = 16 * 1024 * 1024  # 16MB
+                        if content_length_int > max_size:
+                            error_msg = f'文件大小超过限制（{content_length_int / 1024 / 1024:.2f}MB > 16MB）'
+                            logger.warning(f"文件大小超限 - 文件名: {filename}, 大小: {content_length_int}, 用户: {current_user.id}")
+                            flash(error_msg, 'danger')
+                            return redirect(url_for('quickform.create_task'))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"无法解析Content-Length: {content_length}, 错误: {str(e)}")
                 
                 # 检查文件扩展名
                 if not allowed_file(filename):
@@ -304,8 +314,20 @@ def create_task():
                             task.html_approved_at = None
                             task.html_review_note = None
                 else:
-                    error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB'
-                    logger.error(f"文件上传失败 - 文件名: {file.filename}, 用户: {current_user.id}, 文件大小: {request.content_length if hasattr(request, 'content_length') else '未知'}")
+                    # 检查是否是413错误（请求实体过大）
+                    if hasattr(request, 'content_length') and request.content_length:
+                        content_length_mb = request.content_length / 1024 / 1024
+                        if content_length_mb > 16:
+                            error_msg = f'文件上传失败：文件大小({content_length_mb:.2f}MB)超过限制(16MB)。如果文件确实小于16MB，可能是反向代理（如Nginx）的client_max_body_size设置过小，请联系管理员检查服务器配置。'
+                        else:
+                            error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB。如果问题持续，可能是网络问题或反向代理配置问题。'
+                    else:
+                        error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB。如果问题持续，可能是网络问题或反向代理配置问题。'
+                    
+                    logger.error(f"文件上传失败 - 文件名: {file.filename}, 用户: {current_user.id}, "
+                               f"Content-Length: {request.headers.get('Content-Length', '未知') if request else '未知'}, "
+                               f"客户端IP: {request.headers.get('X-Forwarded-For', request.remote_addr) if request else '未知'}, "
+                               f"请求路径: {request.path if request else '未知'}")
                     flash(error_msg, 'danger')
                     return redirect(url_for('quickform.create_task'))
             
@@ -424,9 +446,27 @@ def edit_task(task_id):
             
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
+                filename = file.filename
+                
+                # 检查Content-Length是否超过限制
+                try:
+                    if content_length and content_length != '未知':
+                        content_length_int = int(content_length)
+                        max_size = 16 * 1024 * 1024  # 16MB
+                        if content_length_int > max_size:
+                            error_msg = f'文件大小超过限制（{content_length_int / 1024 / 1024:.2f}MB > 16MB）'
+                            logger.warning(f"文件大小超限(编辑) - 文件名: {filename}, 大小: {content_length_int}, 用户: {current_user.id}")
+                            flash(error_msg, 'danger')
+                            return redirect(url_for('quickform.edit_task', task_id=task.id))
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"无法解析Content-Length: {content_length}, 错误: {str(e)}")
+                
                 # 检查文件扩展名
-                if not allowed_file(file.filename):
-                    flash(f'不支持的文件格式。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}', 'danger')
+                if not allowed_file(filename):
+                    file_ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else '无扩展名'
+                    error_msg = f'不支持的文件格式: {file_ext}。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}'
+                    logger.warning(f"文件格式检查失败(编辑) - 文件名: {filename}, 扩展名: {file_ext}, 用户: {current_user.id}")
+                    flash(error_msg, 'danger')
                     return redirect(url_for('quickform.edit_task', task_id=task.id))
                 
                 unique_filename, filepath = save_uploaded_file(file, UPLOAD_FOLDER)
@@ -557,8 +597,6 @@ def submit_form(task_id):
             return response, 200
         
         # POST方法：提交数据
-        logger.info(f"收到表单提交请求 - task_id: {task_id}")
- 
         client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
         now_ts = datetime.utcnow().timestamp()
 
@@ -577,10 +615,8 @@ def submit_form(task_id):
         try:
             if request.is_json:
                 form_data = request.get_json()
-                logger.info(f"接收到JSON数据: {form_data}")
             else:
                 form_data = request.form.to_dict()
-                logger.info(f"接收到表单数据: {form_data}")
         except Exception as e:
             logger.error(f"解析请求数据失败: {str(e)}")
             response = jsonify({'error': '数据格式错误', 'message': str(e)})
@@ -609,7 +645,6 @@ def submit_form(task_id):
             submission = Submission(task_id=task.id, data=json.dumps(form_data, ensure_ascii=False))
             db.add(submission)
             db.commit()
-            logger.info(f"数据提交成功 - task_id: {task_id}, task_db_id: {task.id}")
         except Exception as e:
             db.rollback()
             logger.error(f"保存提交数据失败: {str(e)}")

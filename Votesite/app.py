@@ -18,6 +18,9 @@ import threading
 import queue
 import atexit
 from sqlalchemy.orm import scoped_session, sessionmaker
+import logging
+
+logger = logging.getLogger(__name__)
 import json
 
 PUBLIC_HOST = "http://wzkjgz.site/"
@@ -464,7 +467,7 @@ def db_worker():
                 func(*args, **kwargs)
                 submit_queue.task_done()
             except Exception as e:
-                print(f"[ERROR] 数据库写入失败: {e}")
+                logger.error(f"数据库写入失败: {e}", exc_info=True)
 
 threading.Thread(target=db_worker, daemon=True).start()
 
@@ -495,7 +498,7 @@ def save_vote_to_db(vote_data):
         # 提交事务
         session.commit()
     except Exception as e:
-        print(f"[ERROR] 数据库写入异常: user_id={vote_data['user_id']}, survey_id={vote_data['survey_id']}, 错误: {e}")
+        logger.error(f"数据库写入异常: user_id={vote_data['user_id']}, survey_id={vote_data['survey_id']}, 错误: {e}", exc_info=True)
         # 遇到异常时尝试重新入队
         submit_queue.put((save_vote_to_db, (vote_data,), {}))
         time.sleep(0.5)

@@ -23,11 +23,8 @@ def allowed_file(filename):
     
     result = ext in ALLOWED_EXTENSIONS
     if not result:
-        # 记录详细信息，包括文件名的原始字节表示
         filename_bytes = filename.encode('utf-8', errors='replace') if filename else b''
-        logger.warning(f"allowed_file: 扩展名不在允许列表中 - 文件名: {filename}, 扩展名: '{ext}' (原始字节: {filename_bytes[-10:]}), 允许的格式: {ALLOWED_EXTENSIONS}")
-    else:
-        logger.info(f"allowed_file: 文件格式检查通过 - 文件名: {filename}, 扩展名: '{ext}'")
+        logger.warning(f"文件格式不允许 - 文件名: {filename}, 扩展名: '{ext}', 允许的格式: {ALLOWED_EXTENSIONS}")
     return result
 
 
@@ -64,17 +61,11 @@ def save_uploaded_file(file, upload_folder):
         # 确保上传目录存在
         if not os.path.exists(upload_folder):
             os.makedirs(upload_folder)
-            logger.info(f"创建上传目录: {upload_folder}")
-        
-        # 记录详细信息用于调试
-        logger.info(f"准备保存文件 - 原始文件名: {original_filename}, 安全文件名: {safe_filename}, 扩展名: {original_filename.rsplit('.', 1)[1].lower() if '.' in original_filename else '无'}, 目标路径: {filepath}")
         
         file.save(filepath)
         
         # 验证文件是否真的保存成功
         if os.path.exists(filepath):
-            file_size = os.path.getsize(filepath)
-            logger.info(f"文件保存成功: {original_filename} -> {unique_filename}, 大小: {file_size} 字节")
             return unique_filename, filepath
         else:
             logger.error(f"文件保存后验证失败: 文件不存在于 {filepath}")
