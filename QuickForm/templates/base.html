@@ -204,6 +204,288 @@
                 yearElement.innerHTML = yearElement.innerHTML.replace('{{ current_year }}', currentYear);
             }
         });
+        
+        // ========== 公共文件上传工具函数 ==========
+        
+        /**
+         * 通用的拖拽悬停处理
+         */
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.currentTarget.style.borderColor = '#1a73e8';
+            e.currentTarget.style.backgroundColor = '#f0f7ff';
+        }
+        
+        /**
+         * 通用的拖拽离开处理
+         */
+        function handleDragLeaveCommon(e, areaId) {
+            e.preventDefault();
+            e.stopPropagation();
+            const area = document.getElementById(areaId);
+            if (area) {
+                area.style.borderColor = '#d0d0d0';
+                area.style.backgroundColor = '#fafafa';
+            }
+        }
+        
+        /**
+         * 通用的文件选择处理
+         * @param {File} file - 选择的文件
+         * @param {string} textDivId - 显示文本的div ID
+         */
+        function handleFileSelectCommon(file, textDivId) {
+            if (!file) return false;
+            
+            // 检查文件格式
+            if (!file.name.toLowerCase().endsWith('.html') && !file.name.toLowerCase().endsWith('.htm')) {
+                alert('仅支持上传HTML或HTM格式的文件');
+                return false;
+            }
+            
+            // 检查文件大小
+            if (file.size > 16 * 1024 * 1024) {
+                alert('文件大小超过16MB限制');
+                return false;
+            }
+            
+            // 显示文件名
+            const textDiv = document.getElementById(textDivId);
+            if (textDiv) {
+                textDiv.innerHTML = `<p class="mb-0" style="color: #28a745;">✓ 已选择: ${file.name}</p>`;
+            }
+            
+            return true;
+        }
+        
+        /**
+         * 通用的拖拽放置处理
+         * @param {Event} e - 拖拽事件
+         * @param {string} fileInputId - 文件输入框ID
+         * @param {string} areaId - 拖拽区域ID
+         * @param {string} textDivId - 文本显示div ID
+         * @param {Function} onFileSelected - 文件选择后的回调函数
+         */
+        function handleDropCommon(e, fileInputId, areaId, textDivId, onFileSelected) {
+            e.preventDefault();
+            e.stopPropagation();
+            const area = document.getElementById(areaId);
+            if (area) {
+                area.style.borderColor = '#d0d0d0';
+                area.style.backgroundColor = '#fafafa';
+            }
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const file = files[0];
+                const fileInput = document.getElementById(fileInputId);
+                if (fileInput) {
+                    // 创建新的FileList（因为不能直接赋值）
+                    const dataTransfer = new DataTransfer();
+                    dataTransfer.items.add(file);
+                    fileInput.files = dataTransfer.files;
+                    
+                    if (handleFileSelectCommon(file, textDivId)) {
+                        if (onFileSelected) {
+                            onFileSelected(file);
+                        }
+                    }
+                }
+            }
+        }
+        
+        /**
+         * 使用XMLHttpRequest上传文件（避免fetch被拦截）
+         * @param {File} file - 要上传的文件
+         * @param {string} uploadUrl - 上传URL
+         * @param {Object} options - 配置选项
+         * @param {Object} options.formData - 额外的FormData字段
+         * @param {string} options.progressDivId - 进度显示div ID
+         * @param {string} options.successDivId - 成功显示div ID
+         * @param {string} options.errorDivId - 错误显示div ID
+         * @param {string} options.errorMessageId - 错误消息div ID
+         * @param {string} options.textDivId - 文本显示div ID
+         * @param {Function} options.onSuccess - 成功回调
+         * @param {Function} options.onError - 错误回调
+         */
+        function uploadFileWithXHR(file, uploadUrl, options = {}) {
+            const {
+                formData: extraFormData = {},
+                progressDivId,
+                successDivId,
+                errorDivId,
+                errorMessageId,
+                textDivId,
+                onSuccess,
+                onError
+            } = options;
+            
+            // 检查文件大小
+            if (file.size > 16 * 1024 * 1024) {
+                const errorMsg = '文件大小超过16MB限制';
+                if (errorDivId && errorMessageId) {
+                    document.getElementById(errorMessageId).textContent = errorMsg;
+                    document.getElementById(errorDivId).style.display = 'block';
+                } else {
+                    alert(errorMsg);
+                }
+                if (onError) onError(new Error(errorMsg));
+                return;
+            }
+            
+            // 显示进度
+            if (progressDivId) {
+                document.getElementById(progressDivId).style.display = 'block';
+            }
+            if (textDivId) {
+                document.getElementById(textDivId).style.display = 'none';
+            }
+            if (successDivId) {
+                document.getElementById(successDivId).style.display = 'none';
+            }
+            if (errorDivId) {
+                document.getElementById(errorDivId).style.display = 'none';
+            }
+            
+            // 创建FormData
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            // 添加额外字段
+            for (const [key, value] of Object.entries(extraFormData)) {
+                formData.append(key, value);
+            }
+            
+            // 创建XMLHttpRequest
+            const xhr = new XMLHttpRequest();
+            xhr.timeout = 60000; // 60秒超时
+            
+            // 上传进度
+            xhr.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    const percentComplete = (e.loaded / e.total) * 100;
+                    // 可以在这里更新进度条
+                }
+            });
+            
+            // 请求完成
+            xhr.addEventListener('load', function() {
+                if (xhr.status === 200) {
+                    try {
+                        const contentType = xhr.getResponseHeader('content-type');
+                        let success = false;
+                        
+                        if (contentType && contentType.includes('application/json')) {
+                            const data = JSON.parse(xhr.responseText);
+                            success = data.success === true;
+                            if (!success && onError) {
+                                onError(new Error(data.message || '上传失败'));
+                            }
+                        } else {
+                            // HTML响应，检查是否包含错误
+                            const html = xhr.responseText;
+                            if (html.includes('alert-danger') || html.includes('文件上传失败') || html.includes('不支持的文件格式')) {
+                                if (onError) {
+                                    onError(new Error('上传失败，请检查文件格式和大小'));
+                                }
+                            } else {
+                                success = true;
+                            }
+                        }
+                        
+                        if (success) {
+                            if (progressDivId) {
+                                document.getElementById(progressDivId).style.display = 'none';
+                            }
+                            if (successDivId) {
+                                document.getElementById(successDivId).style.display = 'block';
+                            }
+                            if (onSuccess) {
+                                onSuccess();
+                            }
+                        } else {
+                            if (progressDivId) {
+                                document.getElementById(progressDivId).style.display = 'none';
+                            }
+                            if (textDivId) {
+                                document.getElementById(textDivId).style.display = 'flex';
+                            }
+                        }
+                    } catch (e) {
+                        if (progressDivId) {
+                            document.getElementById(progressDivId).style.display = 'none';
+                        }
+                        if (errorDivId && errorMessageId) {
+                            document.getElementById(errorMessageId).textContent = e.message || '上传失败';
+                            document.getElementById(errorDivId).style.display = 'block';
+                        }
+                        if (textDivId) {
+                            document.getElementById(textDivId).style.display = 'flex';
+                        }
+                        if (onError) {
+                            onError(e);
+                        }
+                    }
+                } else {
+                    const errorMsg = '上传失败，HTTP状态码: ' + xhr.status;
+                    if (progressDivId) {
+                        document.getElementById(progressDivId).style.display = 'none';
+                    }
+                    if (errorDivId && errorMessageId) {
+                        document.getElementById(errorMessageId).textContent = errorMsg;
+                        document.getElementById(errorDivId).style.display = 'block';
+                    }
+                    if (textDivId) {
+                        document.getElementById(textDivId).style.display = 'flex';
+                    }
+                    if (onError) {
+                        onError(new Error(errorMsg));
+                    }
+                }
+            });
+            
+            // 请求错误
+            xhr.addEventListener('error', function() {
+                const errorMsg = '网络错误，上传失败。请检查网络连接后重试。';
+                if (progressDivId) {
+                    document.getElementById(progressDivId).style.display = 'none';
+                }
+                if (errorDivId && errorMessageId) {
+                    document.getElementById(errorMessageId).textContent = errorMsg;
+                    document.getElementById(errorDivId).style.display = 'block';
+                }
+                if (textDivId) {
+                    document.getElementById(textDivId).style.display = 'flex';
+                }
+                if (onError) {
+                    onError(new Error(errorMsg));
+                }
+            });
+            
+            // 请求超时
+            xhr.addEventListener('timeout', function() {
+                const errorMsg = '上传超时，请检查网络连接后重试。';
+                if (progressDivId) {
+                    document.getElementById(progressDivId).style.display = 'none';
+                }
+                if (errorDivId && errorMessageId) {
+                    document.getElementById(errorMessageId).textContent = errorMsg;
+                    document.getElementById(errorDivId).style.display = 'block';
+                }
+                if (textDivId) {
+                    document.getElementById(textDivId).style.display = 'flex';
+                }
+                if (onError) {
+                    onError(new Error(errorMsg));
+                }
+            });
+            
+            // 发送请求
+            xhr.open('POST', uploadUrl, true);
+            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+            xhr.send(formData);
+        }
     </script>
     {% block scripts %}
     {% endblock %}

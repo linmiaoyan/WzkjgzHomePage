@@ -27,7 +27,7 @@ from typing import Deque
 
 # 导入分离的模块
 from models import Base, User, Task, Submission, AIConfig, migrate_database, CertificationRequest
-from file_service import save_uploaded_file, read_file_content, ALLOWED_EXTENSIONS, allowed_file
+from file_service import save_uploaded_file, read_file_content, ALLOWED_EXTENSIONS, allowed_file, CERTIFICATION_ALLOWED_EXTENSIONS
 from ai_service import call_ai_model, generate_analysis_prompt, analyze_html_file
 from report_service import (
     save_analysis_report, generate_report_image, perform_analysis_with_custom_prompt,
@@ -976,9 +976,9 @@ def certification_request():
                 flash('请上传能够证明教师身份的材料（允许图片或PDF）。', 'danger')
                 return redirect(url_for('quickform.certification_request'))
 
-            unique_filename, filepath = save_uploaded_file(file, CERTIFICATION_FOLDER)
+            unique_filename, filepath = save_uploaded_file(file, CERTIFICATION_FOLDER, CERTIFICATION_ALLOWED_EXTENSIONS)
             if not unique_filename:
-                flash('文件上传失败或格式不支持，请重试。', 'danger')
+                flash('文件上传失败或格式不支持，请重试。支持 PNG / JPG / JPEG / PDF 格式。', 'danger')
                 return redirect(url_for('quickform.certification_request'))
 
             cert_request = CertificationRequest(

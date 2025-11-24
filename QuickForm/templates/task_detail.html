@@ -52,7 +52,7 @@
                 {% endif %}
                 
                 <div class="mt-3">
-                    <label class="form-label"><strong>HTML文件上传</strong></label>
+                    <label class="form-label"><strong>HTML文件</strong></label>
                     {% if task.file_name %}
                     <div class="alert alert-success mb-2">
                         <div class="d-flex align-items-center justify-content-between">
@@ -79,35 +79,15 @@
                         </div>
                         {% elif task.html_approved != 1 %}
                         <div class="alert alert-warning mt-2 mb-0" role="alert">
-                            页面正在审核中，暂时无法公开访问。若需修改，请重新上传。
+                            页面正在审核中，暂时无法公开访问。若需修改，请前往编辑任务页面重新上传。
                         </div>
                         {% endif %}
                     </div>
-                    {% endif %}
-                    
-                    <!-- 拖拽上传区域 -->
-                    <div id="html-upload-area-{{ task.id }}" class="html-upload-area" 
-                         style="border: 2px dashed #d0d0d0; border-radius: 8px; padding: 20px; text-align: center; background-color: #fafafa; cursor: pointer; transition: all 0.3s; min-height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center;"
-                         ondrop="handleDrop(event, {{ task.id }})" 
-                         ondragover="handleDragOver(event)" 
-                         ondragleave="handleDragLeave(event, {{ task.id }})"
-                         onclick="document.getElementById('html-file-input-{{ task.id }}').click()">
-                        <input type="file" id="html-file-input-{{ task.id }}" name="html_file" accept=".html,.htm" style="display: none;" onchange="handleFileSelect(event, {{ task.id }})">
-                        <div id="upload-text-{{ task.id }}">
-                            <p class="mb-2" style="color: #666; margin: 0;">拖拽文件到此处上传，或</p>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" style="border: 1px solid #d0d0d0; background: white; color: #666;">选择文件</button>
-                        </div>
-                        <div id="upload-progress-{{ task.id }}" style="display: none;">
-                            <div class="spinner-border spinner-border-sm text-primary" role="status">
-                                <span class="visually-hidden">上传中...</span>
-                            </div>
-                            <p class="mt-2 mb-0" style="color: #666;">正在上传...</p>
-                        </div>
-                        <div id="upload-success-{{ task.id }}" style="display: none;">
-                            <p class="mb-0" style="color: #28a745;">✓ 上传成功！</p>
-                        </div>
+                    {% else %}
+                    <div class="alert alert-info mb-2">
+                        <p class="mb-0">尚未上传HTML文件。如需上传，请前往 <a href="{{ url_for('quickform.edit_task', task_id=task.id) }}" class="alert-link">编辑任务</a> 页面。</p>
                     </div>
-                    <small class="form-text text-muted d-block mt-2">仅支持HTML或HTM格式，最大16MB。上传后可在互联网在线访问该页面。</small>
+                    {% endif %}
                 </div>
 
                 {% if task.rate_limit_log %}
@@ -304,135 +284,6 @@ function sendTestData() {
 <script src="{{ url_for('static', filename='js/qrcode.min.js') }}"></script>
 <script>
     // 拖拽上传处理函数
-    function handleDragOver(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.currentTarget.style.borderColor = '#1a73e8';
-        e.currentTarget.style.backgroundColor = '#f0f7ff';
-    }
-    
-    function handleDragLeave(e, taskId) {
-        e.preventDefault();
-        e.stopPropagation();
-        const area = document.getElementById('html-upload-area-' + taskId);
-        if (area) {
-            area.style.borderColor = '#d0d0d0';
-            area.style.backgroundColor = '#fafafa';
-        }
-    }
-    
-    function handleDrop(e, taskId) {
-        e.preventDefault();
-        e.stopPropagation();
-        const area = document.getElementById('html-upload-area-' + taskId);
-        if (area) {
-            area.style.borderColor = '#d0d0d0';
-            area.style.backgroundColor = '#fafafa';
-        }
-        
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            const file = files[0];
-            if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) {
-                uploadHtmlFile(file, taskId);
-            } else {
-                alert('仅支持上传HTML或HTM格式的文件');
-            }
-        }
-    }
-    
-    function handleFileSelect(e, taskId) {
-        const file = e.target.files[0];
-        if (file) {
-            if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) {
-                uploadHtmlFile(file, taskId);
-            } else {
-                alert('仅支持上传HTML或HTM格式的文件');
-                e.target.value = '';
-            }
-        }
-    }
-    
-    function uploadHtmlFile(file, taskId) {
-        const area = document.getElementById('html-upload-area-' + taskId);
-        const textDiv = document.getElementById('upload-text-' + taskId);
-        const progressDiv = document.getElementById('upload-progress-' + taskId);
-        const successDiv = document.getElementById('upload-success-' + taskId);
-        
-        if (!area || !textDiv || !progressDiv || !successDiv) return;
-        
-        // 检查文件大小
-        if (file.size > 16 * 1024 * 1024) {
-            alert('文件大小超过16MB限制');
-            return;
-        }
-        
-        // 显示上传进度
-        textDiv.style.display = 'none';
-        progressDiv.style.display = 'block';
-        successDiv.style.display = 'none';
-        
-        // 创建FormData - 需要包含表单的其他字段
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('title', document.querySelector('input[name="title"]')?.value || '{{ task.title }}');
-        formData.append('description', document.querySelector('textarea[name="description"]')?.value || '{{ task.description or "" }}');
-        
-        // 发送到编辑任务接口
-        fetch('{{ url_for("quickform.edit_task", task_id=task.id) }}', {
-            method: 'POST',
-            body: formData,
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        })
-        .then(response => {
-            // 尝试解析JSON响应
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                return response.json().then(data => {
-                    if (!response.ok) {
-                        throw new Error(data.message || '上传失败');
-                    }
-                    return data;
-                });
-            }
-            // 如果不是JSON，尝试解析文本（向后兼容）
-            if (response.ok) {
-                return response.text().then(html => {
-                    // 检查响应中是否包含错误信息
-                    if (html.includes('alert-danger') || html.includes('文件上传失败') || html.includes('不支持的文件格式')) {
-                        throw new Error('上传失败，请检查文件格式和大小');
-                    }
-                    return { success: true, message: '上传成功' };
-                });
-            }
-            throw new Error('上传失败，HTTP状态码: ' + response.status);
-        })
-        .then(data => {
-            // 上传成功
-            progressDiv.style.display = 'none';
-            successDiv.style.display = 'block';
-            setTimeout(() => {
-                window.location.reload();
-            }, 1000);
-        })
-        .catch(error => {
-            console.error('Upload error:', error);
-            progressDiv.style.display = 'none';
-            const errorDiv = document.getElementById('upload-error-' + taskId);
-            const errorMessageEl = document.getElementById('upload-error-message-' + taskId);
-            if (errorDiv && errorMessageEl) {
-                errorMessageEl.textContent = error.message || '上传失败，请检查文件格式和大小';
-                errorDiv.style.display = 'block';
-                textDiv.style.display = 'flex'; // 显示文本区域以便重新上传
-            } else {
-                alert('上传失败：' + (error.message || '未知错误'));
-                textDiv.style.display = 'flex';
-            }
-        });
-    }
-    
     function toggleQRCode(btn) {
         const container = btn.nextElementSibling;
         const qrcodeDiv = container.querySelector('div[id^="qrcode-"]');

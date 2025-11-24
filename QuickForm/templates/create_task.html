@@ -105,58 +105,27 @@ fetch('您的提交URL', {
 
 {% block scripts %}
 <script>
-    // 拖拽上传处理函数（创建任务）
-    function handleDragOver(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.currentTarget.style.borderColor = '#1a73e8';
-        e.currentTarget.style.backgroundColor = '#f0f7ff';
-    }
-    
+    // 使用公共函数处理拖拽离开
     function handleDragLeaveCreate(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const area = document.getElementById('html-upload-area-create');
-        if (area) {
-            area.style.borderColor = '#d0d0d0';
-            area.style.backgroundColor = '#fafafa';
-        }
+        handleDragLeaveCommon(e, 'html-upload-area-create');
     }
     
+    // 使用公共函数处理拖拽放置
     function handleDropCreate(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const area = document.getElementById('html-upload-area-create');
-        if (area) {
-            area.style.borderColor = '#d0d0d0';
-            area.style.backgroundColor = '#fafafa';
-        }
-        
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            const file = files[0];
-            if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) {
-                document.getElementById('html-file-input-create').files = e.dataTransfer.files;
-                handleFileSelectCreate({target: {files: e.dataTransfer.files}});
-            } else {
-                alert('仅支持上传HTML或HTM格式的文件');
-            }
-        }
+        handleDropCommon(
+            e,
+            'html-file-input-create',
+            'html-upload-area-create',
+            'upload-text-create',
+            null // 创建页面不需要立即上传，等表单提交
+        );
     }
     
+    // 使用公共函数处理文件选择
     function handleFileSelectCreate(e) {
         const file = e.target.files[0];
         if (file) {
-            if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) {
-                // 文件已选择，显示文件名
-                const textDiv = document.getElementById('upload-text-create');
-                if (textDiv) {
-                    textDiv.innerHTML = `<p class="mb-0" style="color: #28a745;">✓ 已选择: ${file.name}</p>`;
-                }
-            } else {
-                alert('仅支持上传HTML或HTM格式的文件');
-                e.target.value = '';
-            }
+            handleFileSelectCommon(file, 'upload-text-create');
         }
     }
 </script>

@@ -9,9 +9,23 @@ logger = logging.getLogger(__name__)
 # 允许的文件扩展名（仅HTML格式）
 ALLOWED_EXTENSIONS = {'html', 'htm'}
 
+# 认证文件允许的扩展名
+CERTIFICATION_ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'pdf'}
 
-def allowed_file(filename):
-    """检查文件扩展名是否允许"""
+
+def allowed_file(filename, allowed_extensions=None):
+    """检查文件扩展名是否允许
+    
+    Args:
+        filename: 文件名
+        allowed_extensions: 允许的扩展名集合，如果为None则使用默认的ALLOWED_EXTENSIONS
+    
+    Returns:
+        bool: 是否允许
+    """
+    if allowed_extensions is None:
+        allowed_extensions = ALLOWED_EXTENSIONS
+    
     if not filename or '.' not in filename:
         logger.warning(f"allowed_file: 文件名无效或没有扩展名 - {filename}")
         return False
@@ -21,15 +35,24 @@ def allowed_file(filename):
     # 去除可能的BOM或其他隐藏字符
     ext = ext.replace('\ufeff', '').replace('\u200b', '').strip()
     
-    result = ext in ALLOWED_EXTENSIONS
+    result = ext in allowed_extensions
     if not result:
         filename_bytes = filename.encode('utf-8', errors='replace') if filename else b''
-        logger.warning(f"文件格式不允许 - 文件名: {filename}, 扩展名: '{ext}', 允许的格式: {ALLOWED_EXTENSIONS}")
+        logger.warning(f"文件格式不允许 - 文件名: {filename}, 扩展名: '{ext}', 允许的格式: {allowed_extensions}")
     return result
 
 
-def save_uploaded_file(file, upload_folder):
-    """保存上传的文件"""
+def save_uploaded_file(file, upload_folder, allowed_extensions=None):
+    """保存上传的文件
+    
+    Args:
+        file: 文件对象
+        upload_folder: 上传文件夹路径
+        allowed_extensions: 允许的扩展名集合，如果为None则使用默认的ALLOWED_EXTENSIONS
+    
+    Returns:
+        tuple: (unique_filename, filepath) 或 (None, None) 如果失败
+    """
     try:
         if not file:
             logger.warning("save_uploaded_file: file对象为空")
@@ -39,9 +62,12 @@ def save_uploaded_file(file, upload_folder):
             logger.warning("save_uploaded_file: 文件名为空")
             return None, None
         
-        if not allowed_file(file.filename):
+        if allowed_extensions is None:
+            allowed_extensions = ALLOWED_EXTENSIONS
+        
+        if not allowed_file(file.filename, allowed_extensions):
             file_ext = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else '无扩展名'
-            logger.warning(f"save_uploaded_file: 不支持的文件格式 - {file.filename}, 扩展名: {file_ext}, 允许的格式: {ALLOWED_EXTENSIONS}")
+            logger.warning(f"save_uploaded_file: 不支持的文件格式 - {file.filename}, 扩展名: {file_ext}, 允许的格式: {allowed_extensions}")
             return None, None
         
         # 处理文件名，确保编码正确
