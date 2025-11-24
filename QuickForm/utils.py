@@ -11,8 +11,8 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
-# 全局变量
-ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'zip'}
+# 全局变量（仅HTML格式）
+ALLOWED_EXTENSIONS = {'html', 'htm'}
 analysis_progress = {}
 analysis_results = {}
 completed_reports = set()

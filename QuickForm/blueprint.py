@@ -60,8 +60,8 @@ CERTIFICATION_FOLDER = os.path.join(UPLOAD_FOLDER, 'certifications')
 if not os.path.exists(CERTIFICATION_FOLDER):
     os.makedirs(CERTIFICATION_FOLDER)
 
-# 允许的文件扩展名
-ALLOWED_EXTENSIONS = {'pdf', 'html', 'htm', 'jpg', 'jpeg', 'png', 'zip', 'txt'}
+# 允许的文件扩展名（仅HTML格式）
+ALLOWED_EXTENSIONS = {'html', 'htm'}
 
 # 数据库配置（相对于QuickForm目录）
 DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
@@ -447,6 +447,7 @@ def edit_task(task_id):
             if 'file' in request.files and request.files['file'].filename != '':
                 file = request.files['file']
                 filename = file.filename
+                content_length = request.headers.get('Content-Length', '未知')
                 
                 # 检查Content-Length是否超过限制
                 try:
