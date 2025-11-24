@@ -4,13 +4,13 @@
 
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-md-8 text-center">
-        <h1 class="mb-4">欢迎使用 QuickForm</h1>
-        <p class="lead mb-6">简易高效的表单数据回收系统，专为大模型生成的交互网页设计</p>
+    <div class="col-12 col-md-10 col-lg-8 text-center">
+        <h1 class="mb-3 mb-md-4">欢迎使用 QuickForm</h1>
+        <p class="lead mb-4 mb-md-6 px-2">简易高效的表单数据回收系统，专为大模型生成的交互网页设计</p>
         
-        <div class="row mb-8">
+        <div class="row mb-4 mb-md-6 g-3 g-md-4">
             {% for i in range(3) %}
-            <div class="col-md-4">
+            <div class="col-12 col-sm-6 col-md-4">
                 <div class="card h-100">
                     <div class="card-body p-0" style="position: relative; overflow: hidden;">
                         {% if featured_data[i] %}
@@ -21,14 +21,14 @@
                                         scrolling="no"
                                         loading="lazy"></iframe>
                             </div>
-                            <div class="p-3" style="background: white;">
-                                <h5 class="card-title mb-1">{{ featured_data[i].task.title }}</h5>
+                            <div class="p-2 p-md-3" style="background: white;">
+                                <h5 class="card-title mb-1" style="font-size: 0.95rem;">{{ featured_data[i].task.title }}</h5>
                                 <p class="card-text text-muted small mb-0">点击查看完整页面</p>
                             </div>
                         </a>
                         {% else %}
-                        <div class="p-4 text-center text-muted">
-                            <p class="mb-0">暂无加精项目</p>
+                        <div class="p-3 p-md-4 text-center text-muted">
+                            <p class="mb-0 small">暂无加精项目</p>
                         </div>
                         {% endif %}
                     </div>
@@ -38,18 +38,20 @@
         </div>
 
         <div class="card">
-            <div class="card-body">
-                <h3 class="card-title mb-4">快速开始</h3>
-                <p class="card-text mb-4">1. 注册账号或登录系统</p>
-                <p class="card-text mb-4">2. 创建新的数据任务，获取唯一URL</p>
-                <p class="card-text mb-4">3. 将URL集成到您的网页中，接收表单提交</p>
-                <p class="card-text mb-4">4. 在仪表盘查看和分析收集的数据</p>
-                <div class="mt-6">
+            <div class="card-body p-3 p-md-4">
+                <h3 class="card-title mb-3 mb-md-4" style="font-size: 1.25rem;">快速开始</h3>
+                <div class="text-start mb-3 mb-md-4">
+                    <p class="card-text mb-2 mb-md-3 small">1. 注册账号或登录系统</p>
+                    <p class="card-text mb-2 mb-md-3 small">2. 创建新的数据任务，获取唯一URL</p>
+                    <p class="card-text mb-2 mb-md-3 small">3. 将URL集成到您的网页中，接收表单提交</p>
+                    <p class="card-text mb-2 mb-md-3 small">4. 在仪表盘查看和分析收集的数据</p>
+                </div>
+                <div class="mt-4 mt-md-6 d-flex flex-column flex-sm-row gap-2 justify-content-center">
                     {% if current_user.is_authenticated %}
-                        <a href="{{ url_for('quickform.dashboard') }}" class="btn btn-primary btn-lg">进入仪表盘</a>
+                        <a href="{{ url_for('quickform.dashboard') }}" class="btn btn-primary btn-lg w-100 w-sm-auto">进入仪表盘</a>
                     {% else %}
-                        <a href="{{ url_for('quickform.register') }}" class="btn btn-primary btn-lg">立即注册</a>
-                        <a href="{{ url_for('quickform.login') }}" class="btn btn-outline-primary btn-lg ms-3">已有账号？登录</a>
+                        <a href="{{ url_for('quickform.register') }}" class="btn btn-primary btn-lg w-100 w-sm-auto">立即注册</a>
+                        <a href="{{ url_for('quickform.login') }}" class="btn btn-outline-primary btn-lg w-100 w-sm-auto">已有账号？登录</a>
                     {% endif %}
                 </div>
             </div>

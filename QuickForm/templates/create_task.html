@@ -22,9 +22,27 @@
                         <div class="form-text">添加描述可以帮助您更好地管理和识别不同的任务</div>
                     </div>
                     <div class="mb-4">
-                        <label for="file" class="form-label">上传文件（可选）</label>
-                        <input type="file" class="form-control" id="file" name="file" accept=".html,.htm">
-                        <div class="form-text">仅支持上传HTML或HTM格式的文件，最大16MB</div>
+                        <label class="form-label">HTML文件上传（可选）</label>
+                        <!-- 拖拽上传区域 -->
+                        <div id="html-upload-area-create" class="html-upload-area" 
+                             style="border: 2px dashed #d0d0d0; border-radius: 8px; padding: 20px; text-align: center; background-color: #fafafa; cursor: pointer; transition: all 0.3s; min-height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center;"
+                             ondrop="handleDropCreate(event)" 
+                             ondragover="handleDragOver(event)" 
+                             ondragleave="handleDragLeaveCreate(event)"
+                             onclick="document.getElementById('html-file-input-create').click()">
+                            <input type="file" id="html-file-input-create" name="file" accept=".html,.htm" style="display: none;" onchange="handleFileSelectCreate(event)">
+                            <div id="upload-text-create">
+                                <p class="mb-2" style="color: #666; margin: 0;">拖拽文件到此处上传，或</p>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" style="border: 1px solid #d0d0d0; background: white; color: #666;">选择文件</button>
+                            </div>
+                            <div id="upload-progress-create" style="display: none;">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                    <span class="visually-hidden">上传中...</span>
+                                </div>
+                                <p class="mt-2 mb-0" style="color: #666;">正在上传...</p>
+                            </div>
+                        </div>
+                        <small class="form-text text-muted d-block mt-2">仅支持HTML或HTM格式，最大16MB。上传后可在互联网在线访问该页面。</small>
                     </div>
                     
                     <div class="mb-4">
@@ -84,4 +102,63 @@ fetch('您的提交URL', {
         </div>
     </div>
 </div>
+
+{% block scripts %}
+<script>
+    // 拖拽上传处理函数（创建任务）
+    function handleDragOver(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.currentTarget.style.borderColor = '#1a73e8';
+        e.currentTarget.style.backgroundColor = '#f0f7ff';
+    }
+    
+    function handleDragLeaveCreate(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const area = document.getElementById('html-upload-area-create');
+        if (area) {
+            area.style.borderColor = '#d0d0d0';
+            area.style.backgroundColor = '#fafafa';
+        }
+    }
+    
+    function handleDropCreate(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const area = document.getElementById('html-upload-area-create');
+        if (area) {
+            area.style.borderColor = '#d0d0d0';
+            area.style.backgroundColor = '#fafafa';
+        }
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            const file = files[0];
+            if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) {
+                document.getElementById('html-file-input-create').files = e.dataTransfer.files;
+                handleFileSelectCreate({target: {files: e.dataTransfer.files}});
+            } else {
+                alert('仅支持上传HTML或HTM格式的文件');
+            }
+        }
+    }
+    
+    function handleFileSelectCreate(e) {
+        const file = e.target.files[0];
+        if (file) {
+            if (file.name.toLowerCase().endsWith('.html') || file.name.toLowerCase().endsWith('.htm')) {
+                // 文件已选择，显示文件名
+                const textDiv = document.getElementById('upload-text-create');
+                if (textDiv) {
+                    textDiv.innerHTML = `<p class="mb-0" style="color: #28a745;">✓ 已选择: ${file.name}</p>`;
+                }
+            } else {
+                alert('仅支持上传HTML或HTM格式的文件');
+                e.target.value = '';
+            }
+        }
+    }
+</script>
+{% endblock %}
 {% endblock %}

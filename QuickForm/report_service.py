@@ -64,7 +64,7 @@ def save_analysis_report(task_id, report_content, SessionLocal, Task, upload_fol
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>分析报告 - {task.title}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap CSS已通过base.html引入，此处不再重复引入 -->
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

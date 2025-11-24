@@ -33,6 +33,66 @@
         .security-section a:hover {
             background-color: #2a8846;
         }
+        
+        /* 响应式优化 */
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.5rem;
+                margin-bottom: 10px;
+            }
+            header p {
+                font-size: 0.9rem;
+                padding: 0 10px;
+            }
+            .ai-assistants {
+                gap: 15px;
+                margin: 20px 0;
+            }
+            .assistant-card {
+                width: 100%;
+                max-width: 100%;
+                padding: 15px;
+            }
+            .assistant-card h2 {
+                font-size: 1.2rem;
+            }
+            .assistant-card p {
+                font-size: 0.9rem;
+                margin-bottom: 12px;
+            }
+            .assistant-card a {
+                padding: 8px 16px;
+                font-size: 0.9rem;
+                width: 100%;
+                text-align: center;
+            }
+            .security-section {
+                margin-top: 30px;
+                padding: 15px;
+            }
+            .security-section a {
+                padding: 10px 20px;
+                font-size: 16px;
+            }
+        }
+        
+        @media (max-width: 576px) {
+            header h1 {
+                font-size: 1.3rem;
+            }
+            header p {
+                font-size: 0.85rem;
+            }
+            .assistant-card {
+                padding: 12px;
+            }
+            .assistant-card h2 {
+                font-size: 1.1rem;
+            }
+            .assistant-card p {
+                font-size: 0.85rem;
+            }
+        }
     </style>
 {% endblock %}
 

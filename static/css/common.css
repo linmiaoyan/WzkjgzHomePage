@@ -122,23 +122,82 @@ footer {
 /* 响应式设计 */
 @media (max-width: 768px) {
     .nav-container {
-        flex-direction: column;
-        gap: 10px;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 0 15px;
     }
     
     .nav-link {
         font-size: 14px;
-        padding: 8px 15px;
+        padding: 8px 12px;
+        flex: 1 1 auto;
+        min-width: 0;
+        text-align: center;
+    }
+    
+    .main-container {
+        padding: 15px;
+    }
+    
+    header {
+        margin-bottom: 20px;
+    }
+    
+    header h1 {
+        font-size: 1.5rem;
     }
     
     .ai-assistants {
         flex-direction: column;
-        align-items: center;
+        align-items: stretch;
+        gap: 15px;
+        margin: 20px 0;
     }
     
     .assistant-card {
         width: 100%;
-        max-width: 400px;
+        max-width: 100%;
+    }
+}
+
+@media (max-width: 576px) {
+    .nav-container {
+        flex-direction: column;
+        gap: 5px;
+    }
+    
+    .nav-link {
+        width: 100%;
+        padding: 10px;
+    }
+    
+    .main-container {
+        padding: 10px;
+    }
+    
+    header h1 {
+        font-size: 1.3rem;
+    }
+    
+    header p {
+        font-size: 0.9rem;
+    }
+    
+    .assistant-card {
+        padding: 15px;
+    }
+    
+    .assistant-card h2 {
+        font-size: 1.2rem;
+    }
+    
+    .assistant-card p {
+        font-size: 0.9rem;
+    }
+    
+    .assistant-card a {
+        width: 100%;
+        padding: 10px;
     }
 }
 

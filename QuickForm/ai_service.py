@@ -324,6 +324,7 @@ def generate_analysis_prompt(task, submission=None, file_content=None, SessionLo
 def analyze_html_file(task_id, user_id, file_path, SessionLocal, Task, AIConfig, read_file_content_func, call_ai_model_func):
     """在后台分析HTML文件，将分析结果存储到数据库"""
     def analyze_in_background():
+        print(f"[HTML分析] 后台分析任务开始，任务ID: {task_id}, 文件: {file_path}")
         db = SessionLocal()
         try:
             task = db.query(Task).filter_by(id=task_id, user_id=user_id).first()
@@ -332,16 +333,21 @@ def analyze_html_file(task_id, user_id, file_path, SessionLocal, Task, AIConfig,
                 return
             
             # 读取HTML文件内容
+            print(f"[HTML分析] 正在读取文件内容: {file_path}")
             html_content = read_file_content_func(file_path)
             if not html_content or len(html_content) < 100:
+                print(f"[HTML分析] ⚠ HTML文件内容过短（{len(html_content) if html_content else 0} 字符），跳过分析")
                 logger.warning(f"HTML文件内容过短，跳过分析")
                 return
+            print(f"[HTML分析] ✓ 文件内容读取成功，长度: {len(html_content)} 字符")
             
             # 获取用户的AI配置
             ai_config = db.query(AIConfig).filter_by(user_id=user_id).first()
             if not ai_config:
+                print(f"[HTML分析] ⚠ 用户 {user_id} 未配置AI，跳过HTML分析")
                 logger.warning(f"用户 {user_id} 未配置AI，跳过HTML分析")
                 return
+            print(f"[HTML分析] ✓ AI配置获取成功，模型: {ai_config.selected_model}")
             
             # 生成分析提示词
             # 限制HTML内容长度，避免提示词过长
@@ -359,17 +365,22 @@ HTML内容：
             
             # 调用AI进行分析
             try:
+                print(f"[HTML分析] → 正在调用AI模型进行分析...")
                 analysis_result = call_ai_model_func(analysis_prompt, ai_config)
                 # 保存分析结果到数据库
                 task.html_analysis = analysis_result
                 db.commit()
+                print(f"[HTML分析] ✓ HTML文件分析完成，结果长度: {len(analysis_result) if analysis_result else 0} 字符")
                 logger.info(f"任务 {task_id} 的HTML文件分析完成")
             except Exception as e:
-                logger.error(f"分析HTML文件失败: {str(e)}")
+                print(f"[HTML分析] ❌ AI分析失败: {str(e)}")
+                logger.error(f"分析HTML文件失败: {str(e)}", exc_info=True)
         except Exception as e:
-            logger.error(f"HTML分析后台任务失败: {str(e)}")
+            print(f"[HTML分析] ❌ 后台分析任务失败: {str(e)}")
+            logger.error(f"HTML分析后台任务失败: {str(e)}", exc_info=True)
         finally:
             db.close()
+            print(f"[HTML分析] 后台分析任务结束\n")
     
     # 在后台线程中执行分析
     t = threading.Thread(target=analyze_in_background, daemon=True)

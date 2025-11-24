@@ -365,11 +365,21 @@ def create_task():
             db.add(task)
             db.commit()
             
+            print(f"[文件上传] ✓ 任务已保存到数据库，任务ID: {task.id}")
+            
             # 如果是HTML文件，在任务保存后自动在后台分析
             if task.file_path and task.file_path.lower().endswith(('.html', '.htm')):
-                analyze_html_file(task.id, current_user.id, task.file_path, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                try:
+                    print(f"[文件上传] → 启动HTML文件后台分析，任务ID: {task.id}")
+                    analyze_html_file(task.id, current_user.id, task.file_path, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                    print(f"[文件上传] ✓ HTML文件后台分析任务已启动")
+                except Exception as e:
+                    # 后台分析失败不应影响文件上传成功
+                    print(f"[文件上传] ⚠ HTML文件后台分析启动失败（不影响上传）: {str(e)}")
+                    logger.error(f"启动HTML文件分析失败: {str(e)}", exc_info=True)
             
             flash('数据任务创建成功', 'success')
+            print(f"[文件上传] ✓ 准备重定向到任务详情页，任务ID: {task.id}\n")
             return redirect(url_for('quickform.task_detail', task_id=task.id))
         
         # GET 渲染创建页面
@@ -468,6 +478,9 @@ def edit_task(task_id):
             return redirect(url_for('quickform.dashboard'))
         
         if request.method == 'POST':
+            # 检测是否是AJAX请求
+            is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+            
             title = request.form.get('title')
             description = request.form.get('description')
             remove_file = request.form.get('remove_file')
@@ -490,8 +503,9 @@ def edit_task(task_id):
                 print(f"  用户名: {current_user.username}")
                 print(f"  客户端IP: {client_ip}")
                 print(f"  Content-Length: {content_length}")
+                print(f"  AJAX请求: {is_ajax}")
                 print(f"{'='*60}\n")
-                logger.info(f"[文件上传(编辑)] 收到请求 - 文件名: {filename}, 任务: {task.id}, 用户: {current_user.id} ({current_user.username}), IP: {client_ip}, 大小: {content_length}")
+                logger.info(f"[文件上传(编辑)] 收到请求 - 文件名: {filename}, 任务: {task.id}, 用户: {current_user.id} ({current_user.username}), IP: {client_ip}, 大小: {content_length}, AJAX: {is_ajax}")
                 
                 # 检查Content-Length是否超过限制
                 try:
@@ -502,6 +516,8 @@ def edit_task(task_id):
                             error_msg = f'文件大小超过限制（{content_length_int / 1024 / 1024:.2f}MB > 16MB）'
                             print(f"[文件上传(编辑)] ❌ 文件大小超限: {content_length_int / 1024 / 1024:.2f}MB")
                             logger.warning(f"文件大小超限(编辑) - 文件名: {filename}, 大小: {content_length_int}, 用户: {current_user.id}")
+                            if is_ajax:
+                                return jsonify({'success': False, 'message': error_msg}), 400
                             flash(error_msg, 'danger')
                             return redirect(url_for('quickform.edit_task', task_id=task.id))
                 except (ValueError, TypeError) as e:
@@ -513,6 +529,8 @@ def edit_task(task_id):
                     error_msg = f'不支持的文件格式: {file_ext}。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}'
                     print(f"[文件上传(编辑)] ❌ 文件格式不允许: {file_ext}")
                     logger.warning(f"文件格式检查失败(编辑) - 文件名: {filename}, 扩展名: {file_ext}, 用户: {current_user.id}")
+                    if is_ajax:
+                        return jsonify({'success': False, 'message': error_msg}), 400
                     flash(error_msg, 'danger')
                     return redirect(url_for('quickform.edit_task', task_id=task.id))
                 
@@ -548,14 +566,36 @@ def edit_task(task_id):
                             task.html_review_note = None
                             print(f"[文件上传(编辑)] ⏳ HTML文件待审核")
                         task.html_analysis = None  # 清空旧的分析结果
-                        analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                        try:
+                            print(f"[文件上传(编辑)] → 启动HTML文件后台分析，任务ID: {task.id}")
+                            analyze_html_file(task.id, current_user.id, filepath, SessionLocal, Task, AIConfig, read_file_content, call_ai_model)
+                            print(f"[文件上传(编辑)] ✓ HTML文件后台分析任务已启动")
+                        except Exception as e:
+                            # 后台分析失败不应影响文件上传成功
+                            print(f"[文件上传(编辑)] ⚠ HTML文件后台分析启动失败（不影响上传）: {str(e)}")
+                            logger.error(f"启动HTML文件分析失败(编辑): {str(e)}", exc_info=True)
                     print(f"{'='*60}\n")
+                    
+                    # 提交数据库更改
+                    db.commit()
+                    
+                    # 如果是AJAX请求，返回JSON响应
+                    if is_ajax:
+                        return jsonify({
+                            'success': True,
+                            'message': '文件上传成功',
+                            'filename': file.filename,
+                            'file_size': file_size
+                        })
                 else:
                     print(f"[文件上传(编辑)] ❌ 文件保存失败")
                     print(f"  文件名: {file.filename}")
                     print(f"{'='*60}\n")
-                    flash(f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB', 'danger')
+                    error_msg = f'文件上传失败，请检查文件格式和大小。允许的格式：{", ".join(sorted(ALLOWED_EXTENSIONS))}，最大16MB'
                     logger.error(f"文件上传失败: {file.filename}, 用户: {current_user.id}, 任务: {task.id}")
+                    if is_ajax:
+                        return jsonify({'success': False, 'message': error_msg}), 400
+                    flash(error_msg, 'danger')
                     return redirect(url_for('quickform.edit_task', task_id=task.id))
             elif remove_file:
                 if task.file_path and os.path.exists(task.file_path):
@@ -565,6 +605,14 @@ def edit_task(task_id):
                 task.html_review_note = None
             
             db.commit()
+            
+            # 如果是AJAX请求，返回JSON响应
+            if is_ajax:
+                return jsonify({
+                    'success': True,
+                    'message': '任务更新成功'
+                })
+            
             flash('任务更新成功', 'success')
             return redirect(url_for('quickform.task_detail', task_id=task.id))
         
