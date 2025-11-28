@@ -626,8 +626,8 @@ def ai_test_page():
     return render_template('ai_test.html')
 
 SUBMIT_RATE_LIMIT_WINDOW = 10  # seconds
-SUBMIT_RATE_LIMIT_THRESHOLD = 40
-SUBMIT_BLACKLIST_DURATION = 600  # seconds (10 minutes)
+SUBMIT_RATE_LIMIT_THRESHOLD = 50
+SUBMIT_BLACKLIST_DURATION = 300  # seconds
 
 rate_limit_cache = {}
 
