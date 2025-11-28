@@ -124,7 +124,7 @@
                 <div class="mb-3">
                     <label class="form-label"><strong>数据接口地址（URL）：</strong></label>
                     <div class="input-group">
-                        <input type="text" class="form-control" readonly value="{{ request.host_url }}quickform/api/submit/{{ task.task_id }}" id="post-url">
+                        <input type="text" class="form-control" readonly value="{{ request.host_url|replace('http://', 'https://') }}quickform/api/submit/{{ task.task_id }}" id="post-url">
                         <button class="btn btn-outline-secondary" onclick="copyToClipboard('post-url')">📋 复制URL</button>
                     </div>
                 </div>
@@ -133,7 +133,7 @@
                 <div class="mb-3">
                     <label class="form-label"><strong>精简版提示词（点击复制）：</strong></label>
                     <div class="input-group">
-                        <textarea class="form-control" id="simple-prompt-text" rows="3" readonly style="font-family: 'Courier New', monospace; font-size: 13px;">创建完应用后，向 '{{ request.host_url }}quickform/api/submit/{{ task.task_id }}' 发送post格式的json数据</textarea>
+                        <textarea class="form-control" id="simple-prompt-text" rows="3" readonly style="font-family: 'Courier New', monospace; font-size: 13px;">创建完应用后，向 '{{ request.host_url|replace('http://', 'https://') }}quickform/api/submit/{{ task.task_id }}' 发送post格式的json数据</textarea>
                         <button class="btn btn-outline-primary" onclick="copyToClipboardText('simple-prompt-text')">📋 复制</button>
                     </div>
                 </div>
@@ -154,7 +154,7 @@
 
 <script>
 function sendTestData() {
-    const url = '{{ request.host_url }}quickform/api/submit/{{ task.task_id }}';
+    const url = '{{ request.host_url|replace('http://', 'https://') }}quickform/api/submit/{{ task.task_id }}';
     const data = {"字段1": "值1", "字段2": "值2"};
     document.getElementById('send-result').textContent = "提交中...";
     fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)})

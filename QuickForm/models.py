@@ -5,6 +5,7 @@ from sqlalchemy.orm import relationship
 from flask_login import UserMixin
 from datetime import datetime
 import uuid
+import secrets
 import logging
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ class Task(Base):
     submission = relationship('Submission', back_populates='task', cascade='all, delete-orphan')
     file_name = Column(String(200))
     file_path = Column(String(500))
-    task_id = Column(String(50), unique=True, default=lambda: str(uuid.uuid4()))
+    task_id = Column(String(50), unique=True, default=lambda: secrets.token_urlsafe(8))
     analysis_report = Column(Text)
     report_file_path = Column(String(500))
     report_generated_at = Column(DateTime)
