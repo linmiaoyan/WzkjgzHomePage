@@ -353,15 +353,14 @@ def analyze_html_file(task_id, user_id, file_path, SessionLocal, Task, AIConfig,
             # 限制HTML内容长度，避免提示词过长
             html_preview = html_content[:5000] if len(html_content) > 5000 else html_content
             analysis_prompt = f"""请分析以下HTML文件的内容，提取关键信息，包括：
-1. 页面的主要功能和用途
-2. 包含的主要内容和结构
+1. 页面的主要功能
+2. 包含的主要内容
 3. 可能的数据收集点或交互元素
-4. 页面的整体特点
 
 HTML内容：
 {html_preview}
 
-请用简洁的中文总结，控制在500字以内。"""
+请用简洁的中文总结，控制在200字以内。"""
             
             # 调用AI进行分析
             try:

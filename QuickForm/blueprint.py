@@ -6,6 +6,7 @@ import os
 import json
 import math
 import random
+import re
 import threading
 import html
 import base64
@@ -1062,15 +1063,42 @@ def smart_analyze(task_id):
         # 刷新task对象以获取最新的html_analysis和custom_prompt
         db.refresh(task)
         submission = db.query(Submission).filter_by(task_id=task_id).all()
+        current_submission_count = len(submission)
         file_content = None
         if task.file_path and os.path.exists(task.file_path):
             file_content = read_file_content(task.file_path)
         
-        # 优先使用保存的自定义提示词，如果没有则生成新的
+        # 检查保存的提示词中的数据条数是否与当前实际数据条数一致
+        should_regenerate_prompt = False
         if task.custom_prompt and task.custom_prompt.strip():
-            preview_prompt = task.custom_prompt
+            # 尝试从提示词中提取数据条数
+            # 匹配 "总提交数量：X 条" 或 "共有 X 条提交记录"
+            count_patterns = [
+                r'总提交数量[：:]\s*(\d+)\s*条',
+                r'共有\s*(\d+)\s*条提交记录',
+                r'总提交数量[：:]\s*(\d+)',
+            ]
+            saved_count = None
+            for pattern in count_patterns:
+                match = re.search(pattern, task.custom_prompt)
+                if match:
+                    saved_count = int(match.group(1))
+                    break
+            
+            # 如果提取到数量且与当前数量不一致，需要重新生成
+            if saved_count is not None and saved_count != current_submission_count:
+                should_regenerate_prompt = True
+                logger.info(f"任务 {task_id} 的数据条数已更新：{saved_count} -> {current_submission_count}，重新生成提示词")
         else:
+            # 如果没有保存的提示词，需要生成
+            should_regenerate_prompt = True
+        
+        # 根据检查结果决定使用保存的提示词还是重新生成
+        if should_regenerate_prompt:
             preview_prompt = generate_analysis_prompt(task, submission, file_content, SessionLocal, Submission)
+            # 更新保存的提示词（但不立即提交，让用户可以选择是否保存）
+        else:
+            preview_prompt = task.custom_prompt
         report = task.analysis_report if task and task.analysis_report else None
 
         running_flag = request.args.get('running') == '1'
