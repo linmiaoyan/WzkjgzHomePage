@@ -655,9 +655,11 @@ def submit_form(task_id):
             logger.warning(f"请求失败: 任务不存在 - task_id: {task_id}")
             return response, 404
         
-        # GET方法：返回任务数据统计
+        # GET方法：返回任务数据统计（只返回最新的3条）
         if request.method == 'GET':
-            submissions = db.query(Submission).filter_by(task_id=task.id).all()
+            # 只获取最新的3条数据
+            submissions = db.query(Submission).filter_by(task_id=task.id).order_by(Submission.submitted_at.desc()).limit(3).all()
+            total_count = db.query(Submission).filter_by(task_id=task.id).count()
             data_list = []
             for sub in submissions:
                 try:
@@ -673,8 +675,9 @@ def submit_form(task_id):
             response = jsonify({
                 'task_id': task.task_id,
                 'task_title': task.title,
-                'total_submissions': len(data_list),
-                'submissions': data_list
+                'total_submissions': total_count,
+                'submissions': data_list,
+                'note': '仅显示最新的3条数据，访问 /api/submit/{}/all 获取全部数据'.format(task_id)
             })
             response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
@@ -777,6 +780,62 @@ def _rate_limit_response(task_id, client_ip, ts, db):
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     return response, 429
+
+@quickform_bp.route('/api/submit/<string:task_id>/all', methods=['GET', 'OPTIONS'])
+def submit_form_all(task_id):
+    """获取任务的全部提交数据"""
+    if request.method == 'OPTIONS':
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        return response
+    
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter_by(task_id=task_id).first()
+        if not task:
+            response = jsonify({'error': '任务不存在', 'task_id': task_id, 'message': f'未找到ID为 {task_id} 的任务'})
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+            logger.warning(f"请求失败: 任务不存在 - task_id: {task_id}")
+            return response, 404
+        
+        # 返回全部数据
+        submissions = db.query(Submission).filter_by(task_id=task.id).order_by(Submission.submitted_at.desc()).all()
+        data_list = []
+        for sub in submissions:
+            try:
+                data = json.loads(sub.data)
+                data['submitted_at'] = sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S')
+                data_list.append(data)
+            except:
+                data_list.append({
+                    'submitted_at': sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S'),
+                    'raw_data': sub.data
+                })
+        
+        response = jsonify({
+            'task_id': task.task_id,
+            'task_title': task.title,
+            'total_submissions': len(data_list),
+            'submissions': data_list
+        })
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 200
+    except Exception as e:
+        logger.error(f"API异常: {str(e)}", exc_info=True)
+        response = jsonify({'error': '服务器错误', 'message': str(e)})
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        return response, 500
+    finally:
+        db.close()
 
 @quickform_bp.route('/api/tasks', methods=['GET'])
 def list_tasks():
@@ -1034,15 +1093,39 @@ def smart_analyze(task_id):
         
         # 如果是提交生成请求，则同步生成并返回同页结果
         if request.method == 'POST':
-            custom_prompt = request.form.get('custom_prompt')
-            if not custom_prompt or not custom_prompt.strip():
-                submission_for_prompt = db.query(Submission).filter_by(task_id=task_id).all()
-                file_content_for_prompt = None
-                if task.file_path and os.path.exists(task.file_path):
-                    file_content_for_prompt = read_file_content(task.file_path)
-                custom_prompt = generate_analysis_prompt(task, submission_for_prompt, file_content_for_prompt, SessionLocal, Submission)
+            # 检查是仅保存模板还是生成报告
+            action = request.form.get('action', 'generate')  # 'save_template' 或 'generate'
             
-            # 保存用户自定义的提示词
+            # 获取用户提示词模板（不包含数据部分）
+            user_prompt_template = request.form.get('user_prompt_template', '').strip()
+            if user_prompt_template:
+                # 保存用户模板
+                task.user_prompt_template = user_prompt_template
+                db.commit()
+            
+            # 如果只是保存模板，直接返回
+            if action == 'save_template':
+                flash('提示词模板已保存', 'success')
+                return redirect(url_for('quickform.smart_analyze', task_id=task.id))
+            
+            # 生成报告的逻辑
+            # 获取提交数据并生成完整提示词
+            submission_for_prompt = db.query(Submission).filter_by(task_id=task_id).all()
+            file_content_for_prompt = None
+            if task.file_path and os.path.exists(task.file_path):
+                file_content_for_prompt = read_file_content(task.file_path)
+            
+            # 检查是否有自定义的完整提示词（用户可能直接编辑了完整提示词）
+            custom_prompt = request.form.get('custom_prompt', '').strip()
+            if custom_prompt:
+                # 用户直接编辑了完整提示词，使用它
+                pass
+            else:
+                # 使用用户模板（如果有）生成完整提示词
+                user_template = task.user_prompt_template if task.user_prompt_template else None
+                custom_prompt = generate_analysis_prompt(task, submission_for_prompt, file_content_for_prompt, SessionLocal, Submission, user_template=user_template)
+            
+            # 保存完整提示词（用于兼容旧代码）
             task.custom_prompt = custom_prompt
             db.commit()
             
@@ -1094,12 +1177,20 @@ def smart_analyze(task_id):
             should_regenerate_prompt = True
         
         # 根据检查结果决定使用保存的提示词还是重新生成
+        # 使用用户模板（如果有）生成预览提示词
+        user_template = task.user_prompt_template if task.user_prompt_template else None
         if should_regenerate_prompt:
-            preview_prompt = generate_analysis_prompt(task, submission, file_content, SessionLocal, Submission)
+            preview_prompt = generate_analysis_prompt(task, submission, file_content, SessionLocal, Submission, user_template=user_template)
             # 更新保存的提示词（但不立即提交，让用户可以选择是否保存）
         else:
-            preview_prompt = task.custom_prompt
+            # 如果数据条数没有变化，但用户模板可能已更新，使用用户模板重新生成
+            if user_template:
+                preview_prompt = generate_analysis_prompt(task, submission, file_content, SessionLocal, Submission, user_template=user_template)
+            else:
+                preview_prompt = task.custom_prompt
+        
         report = task.analysis_report if task and task.analysis_report else None
+        user_prompt_template = task.user_prompt_template if task.user_prompt_template else ''
 
         running_flag = request.args.get('running') == '1'
         should_redirect = False
@@ -1115,6 +1206,7 @@ def smart_analyze(task_id):
                              task=task, 
                              report=report,
                              preview_prompt=preview_prompt,
+                             user_prompt_template=user_prompt_template,
                              ai_config=ai_config,
                              now=datetime.now(),
                              model_label=model_label)

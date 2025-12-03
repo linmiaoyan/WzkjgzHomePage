@@ -173,8 +173,17 @@ def call_ai_model(prompt, ai_config):
         raise Exception(f"不支持的AI模型: {ai_config.selected_model}")
 
 
-def generate_analysis_prompt(task, submission=None, file_content=None, SessionLocal=None, Submission=None):
-    """根据任务信息生成分析提示词（优化版）"""
+def generate_analysis_prompt(task, submission=None, file_content=None, SessionLocal=None, Submission=None, user_template=None):
+    """根据任务信息生成分析提示词（优化版）
+    
+    Args:
+        task: 任务对象
+        submission: 提交数据列表
+        file_content: 文件内容
+        SessionLocal: 数据库会话工厂
+        Submission: 提交模型类
+        user_template: 用户自定义的提示词模板（可选），如果提供，将在模板中查找 {DATA_SECTION} 占位符并替换为数据部分
+    """
     if not submission and SessionLocal and Submission:
         db = SessionLocal()
         try:
@@ -182,17 +191,17 @@ def generate_analysis_prompt(task, submission=None, file_content=None, SessionLo
         finally:
             db.close()
     
-    prompt = f"""你是一个数据分析专家，请基于以下表单数据提供详细的分析报告：
-
-任务标题：{task.title}
+    # 生成数据部分
+    data_section = f"""任务标题：{task.title}
 任务描述：{task.description or '无'}
 
 提交数据信息：
 """
     
+    # 生成数据详细内容
     if submission:
         total_count = len(submission)
-        prompt += f"总提交数量：{total_count} 条\n\n"
+        data_section += f"总提交数量：{total_count} 条\n\n"
         
         # 解析所有数据
         all_data = []
@@ -225,38 +234,41 @@ def generate_analysis_prompt(task, submission=None, file_content=None, SessionLo
         
         # 添加字段统计信息
         if all_data and len(all_data) > 0:
-            prompt += "数据字段统计：\n"
-            for field in all_data[0].keys():
-                field_type_list = field_types.get(field, [])
-                if not field_type_list:
-                    continue
-                
-                # 判断主要类型
-                is_numeric = field_type_list.count('numeric') > len(field_type_list) * 0.8
-                is_boolean = field_type_list.count('boolean') > len(field_type_list) * 0.8
-                
-                prompt += f"  - {field}: "
-                if is_numeric:
-                    values = [v for v in field_values[field] if isinstance(v, (int, float))]
-                    if values:
-                        prompt += f"数值型，范围: {min(values)} - {max(values)}，平均值: {sum(values)/len(values):.2f}\n"
+            # 检查第一个数据项是否为字典类型
+            first_item = all_data[0]
+            if isinstance(first_item, dict):
+                data_section += "数据字段统计：\n"
+                for field in first_item.keys():
+                    field_type_list = field_types.get(field, [])
+                    if not field_type_list:
+                        continue
+                    
+                    # 判断主要类型
+                    is_numeric = field_type_list.count('numeric') > len(field_type_list) * 0.8
+                    is_boolean = field_type_list.count('boolean') > len(field_type_list) * 0.8
+                    
+                    data_section += f"  - {field}: "
+                    if is_numeric:
+                        values = [v for v in field_values[field] if isinstance(v, (int, float))]
+                        if values:
+                            data_section += f"数值型，范围: {min(values)} - {max(values)}，平均值: {sum(values)/len(values):.2f}\n"
+                        else:
+                            data_section += "数值型\n"
+                    elif is_boolean:
+                        values = field_values[field]
+                        true_count = sum(1 for v in values if v is True or str(v).lower() in ['true', '1', 'yes', '是'])
+                        data_section += f"布尔型，是: {true_count}，否: {len(values)-true_count}\n"
                     else:
-                        prompt += "数值型\n"
-                elif is_boolean:
-                    values = field_values[field]
-                    true_count = sum(1 for v in values if v is True or str(v).lower() in ['true', '1', 'yes', '是'])
-                    prompt += f"布尔型，是: {true_count}，否: {len(values)-true_count}\n"
-                else:
-                    # 文本型，统计常见值
-                    values = field_values[field]
-                    value_counts = Counter(values)
-                    top_values = value_counts.most_common(5)
-                    if len(top_values) > 0:
-                        prompt += f"文本型，常见值: {', '.join([f'{k}({v}次)' for k, v in top_values[:3]])}\n"
-                    else:
-                        prompt += "文本型\n"
-            
-            prompt += "\n"
+                        # 文本型，统计常见值
+                        values = field_values[field]
+                        value_counts = Counter(values)
+                        top_values = value_counts.most_common(5)
+                        if len(top_values) > 0:
+                            data_section += f"文本型，常见值: {', '.join([f'{k}({v}次)' for k, v in top_values[:3]])}\n"
+                        else:
+                            data_section += "文本型\n"
+                
+                data_section += "\n"
         
         # 智能采样：根据数据量决定显示多少条
         sample_size = min(20, total_count)  # 最多显示20条
@@ -274,35 +286,52 @@ def generate_analysis_prompt(task, submission=None, file_content=None, SessionLo
                 sample_indices.extend(range(max(0, total_count - 5), total_count))  # 后5条
                 sample_indices = sorted(list(set(sample_indices)))[:sample_size]
             
-            prompt += f"数据样例（共显示 {len(sample_indices)} 条，占总数的 {len(sample_indices)/total_count*100:.1f}%）：\n"
+            data_section += f"数据样例（共显示 {len(sample_indices)} 条，占总数的 {len(sample_indices)/total_count*100:.1f}%）：\n"
             for idx, i in enumerate(sample_indices, 1):
                 try:
                     data = all_data[i]
-                    prompt += f"\n样例 #{idx} (第 {i+1} 条记录):\n"
+                    data_section += f"\n样例 #{idx} (第 {i+1} 条记录):\n"
                     for key, value in data.items():
                         # 限制单个值长度，避免过长
                         value_str = str(value)
                         if len(value_str) > 100:
                             value_str = value_str[:100] + "...[截断]"
-                        prompt += f"  - {key}: {value_str}\n"
+                        data_section += f"  - {key}: {value_str}\n"
                 except:
                     if i < len(submission):
-                        prompt += f"\n样例 #{idx}: {submission[i].data[:100]}...\n"
+                        data_section += f"\n样例 #{idx}: {submission[i].data[:100]}...\n"
         else:
             # 数据量少，全部显示
-            prompt += "完整数据：\n"
+            data_section += "完整数据：\n"
             for i, data in enumerate(all_data, 1):
-                prompt += f"\n提交 #{i}:\n"
+                data_section += f"\n提交 #{i}:\n"
                 for key, value in data.items():
                     value_str = str(value)
                     if len(value_str) > 100:
                         value_str = value_str[:100] + "...[截断]"
-                    prompt += f"  - {key}: {value_str}\n"
+                    data_section += f"  - {key}: {value_str}\n"
     else:
-        prompt += "暂无提交数据\n"
+        data_section += "暂无提交数据\n"
     
+    # 如果任务有HTML分析结果，添加到数据部分
+    if hasattr(task, 'html_analysis') and task.html_analysis:
+        data_section += "\n\n【HTML文件分析结果】\n"
+        data_section += task.html_analysis
+    
+    # 根据是否有用户模板来决定如何组合最终的提示词
+    if user_template and user_template.strip():
+        # 如果提供了用户模板，将数据部分插入到模板中
+        # 查找 {DATA_SECTION} 占位符，如果存在则替换，否则追加到模板末尾
+        if '{DATA_SECTION}' in user_template:
+            prompt = user_template.replace('{DATA_SECTION}', data_section)
+        else:
+            # 如果没有占位符，将数据部分追加到模板末尾
+            prompt = user_template + "\n\n" + data_section
+    else:
+        # 使用默认模板
+        prompt = f"""你是一个数据分析专家，请基于以下表单数据提供详细的分析报告：
 
-    prompt += """
+{data_section}
 
 请提供一个全面的数据分析报告，包括但不限于：
 1. 数据概览：总提交量、关键数据分布、字段类型统计
@@ -312,11 +341,6 @@ def generate_analysis_prompt(task, submission=None, file_content=None, SessionLo
 
 请以中文撰写报告，使用Markdown格式，包括适当的标题、列表和表格来增强可读性。
 """
-    
-    # 如果任务有HTML分析结果，添加到提示词中
-    if hasattr(task, 'html_analysis') and task.html_analysis:
-        prompt += "\n\n【HTML文件分析结果】\n"
-        prompt += task.html_analysis
     
     return prompt
 

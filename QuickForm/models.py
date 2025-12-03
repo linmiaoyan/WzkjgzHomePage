@@ -80,7 +80,8 @@ class Task(Base):
     html_approved_at = Column(DateTime, nullable=True)  # 审核时间
     html_review_note = Column(Text)
     rate_limit_log = Column(Text)
-    custom_prompt = Column(Text)  # 用户自定义的分析提示词
+    custom_prompt = Column(Text)  # 用户自定义的分析提示词（已废弃，保留用于兼容）
+    user_prompt_template = Column(Text)  # 用户自定义的提示词模板（不包含数据部分）
     is_featured = Column(Boolean, default=False)  # 是否加精
     approver = relationship('User', foreign_keys=[html_approved_by], backref='approved_tasks')
 
@@ -248,6 +249,13 @@ def migrate_database(engine):
                     logger.info("成功为task添加custom_prompt字段")
                 except Exception as e:
                     logger.warning(f"添加custom_prompt失败（可能已存在）: {str(e)}")
+            
+            if task_cols and 'user_prompt_template' not in task_cols:
+                try:
+                    conn.execute(text("ALTER TABLE task ADD COLUMN user_prompt_template TEXT"))
+                    logger.info("成功为task添加user_prompt_template字段")
+                except Exception as e:
+                    logger.warning(f"添加user_prompt_template失败（可能已存在）: {str(e)}")
             
             if task_cols and 'is_featured' not in task_cols:
                 try:
