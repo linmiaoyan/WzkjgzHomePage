@@ -663,10 +663,18 @@ def submit_form(task_id):
             data_list = []
             for sub in submissions:
                 try:
+                    # 尝试解析JSON数据
                     data = json.loads(sub.data)
+                    # 如果解析后是字符串，可能是双重编码，再解析一次
+                    if isinstance(data, str):
+                        try:
+                            data = json.loads(data)
+                        except:
+                            pass
                     data['submitted_at'] = sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S')
                     data_list.append(data)
-                except:
+                except (json.JSONDecodeError, TypeError):
+                    # 如果解析失败，返回原始数据作为raw_data
                     data_list.append({
                         'submitted_at': sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S'),
                         'raw_data': sub.data
@@ -676,8 +684,7 @@ def submit_form(task_id):
                 'task_id': task.task_id,
                 'task_title': task.title,
                 'total_submissions': total_count,
-                'submissions': data_list,
-                'note': '仅显示最新的3条数据，访问 /api/submit/{}/all 获取全部数据'.format(task_id)
+                'submissions': data_list
             })
             response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
@@ -728,7 +735,6 @@ def submit_form(task_id):
             return _rate_limit_response(task_id, client_ip, now_ts, db)
         
         # 将数据转换为JSON字符串存储
-        import json
         try:
             submission = Submission(task_id=task.id, data=json.dumps(form_data, ensure_ascii=False))
             db.add(submission)
@@ -808,10 +814,18 @@ def submit_form_all(task_id):
         data_list = []
         for sub in submissions:
             try:
+                # 尝试解析JSON数据
                 data = json.loads(sub.data)
+                # 如果解析后是字符串，可能是双重编码，再解析一次
+                if isinstance(data, str):
+                    try:
+                        data = json.loads(data)
+                    except:
+                        pass
                 data['submitted_at'] = sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S')
                 data_list.append(data)
-            except:
+            except (json.JSONDecodeError, TypeError):
+                # 如果解析失败，返回原始数据作为raw_data
                 data_list.append({
                     'submitted_at': sub.submitted_at.strftime('%Y-%m-%d %H:%M:%S'),
                     'raw_data': sub.data
@@ -958,16 +972,61 @@ def profile():
             elif 'current_password' in request.form:
                 current_password = request.form.get('current_password')
                 new_password = request.form.get('new_password')
+                confirm_password = request.form.get('confirm_password', '')
                 
-                if bcrypt.check_password_hash(current_user.password, current_password):
+                if not bcrypt.check_password_hash(current_user.password, current_password):
+                    flash('当前密码错误', 'danger')
+                elif new_password != confirm_password:
+                    flash('新密码与确认密码不匹配', 'danger')
+                elif len(new_password) < 6:
+                    flash('密码长度至少为6个字符', 'danger')
+                else:
                     hashed = bcrypt.generate_password_hash(new_password).decode('utf-8')
                     current_user.password = hashed
                     if user_record:
                         user_record.password = hashed
                     db.commit()
                     flash('密码修改成功', 'success')
+            
+            elif 'update_profile' in request.form:
+                # 修改个人信息
+                username = request.form.get('username', '').strip()
+                email = request.form.get('email', '').strip()
+                school = request.form.get('school', '').strip()
+                phone = request.form.get('phone', '').strip()
+                
+                if not username or not email or not school or not phone:
+                    flash('请填写所有必填字段', 'danger')
+                    return redirect(url_for('quickform.profile'))
+                
+                import re
+                if not re.match(r'^1[3-9]\d{9}$', phone):
+                    flash('请输入正确的11位手机号码', 'danger')
+                    return redirect(url_for('quickform.profile'))
+                
+                # 检查用户名和邮箱是否已被其他用户使用
+                existing_user = db.query(User).filter(
+                    (User.username == username) | (User.email == email)
+                ).filter(User.id != current_user.id).first()
+                
+                if existing_user:
+                    flash('用户名或邮箱已被其他用户使用', 'danger')
+                    return redirect(url_for('quickform.profile'))
+                
+                # 更新用户信息
+                if user_record:
+                    user_record.username = username
+                    user_record.email = email
+                    user_record.school = school
+                    user_record.phone = phone
                 else:
-                    flash('当前密码错误', 'danger')
+                    current_user.username = username
+                    current_user.email = email
+                    current_user.school = school
+                    current_user.phone = phone
+                
+                db.commit()
+                flash('个人信息更新成功', 'success')
             
             return redirect(url_for('quickform.profile'))
         

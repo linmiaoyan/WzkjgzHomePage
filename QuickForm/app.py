@@ -252,7 +252,7 @@ def generate_report(task_id):
             return render_template('generate_report.html', task=task, error="提示词不能为空", ai_config=ai_config)
         
         try:
-            timeout_seconds = 120 if ai_config.selected_model in ['deepseek', 'qwen'] else 90
+            timeout_seconds = 300
             
             @timeout(seconds=timeout_seconds, error_message=f"调用{ai_config.selected_model}模型超时")
             def call_ai_with_timeout(prompt, config):
@@ -281,7 +281,7 @@ def create_task():
     try:
         if not current_user.is_admin():
             if not current_user.can_create_task(SessionLocal, Task):
-            task_count = db.query(Task).filter_by(user_id=current_user.id).count()
+                task_count = db.query(Task).filter_by(user_id=current_user.id).count()
                 flash('您已达到任务数量上限（3个）。如需创建更多任务，请联系管理员：wzlinmiaoyan@163.com', 'warning')
                 return redirect(url_for('dashboard'))
         

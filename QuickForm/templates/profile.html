@@ -55,21 +55,54 @@
                 
                 <ul class="nav nav-tabs mb-4">
                     <li class="nav-item">
-                        <a class="nav-link active" id="config-tab" data-bs-toggle="tab" href="#config">AI配置</a>
+                        <a class="nav-link active" id="profile-tab" data-bs-toggle="tab" href="#profile" style="color: #000; font-weight: 500;">个人信息</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" id="password-tab" data-bs-toggle="tab" href="#password">密码修改</a>
+                        <a class="nav-link" id="config-tab" data-bs-toggle="tab" href="#config" style="color: #000; font-weight: 500;">AI配置</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" id="password-tab" data-bs-toggle="tab" href="#password" style="color: #000; font-weight: 500;">密码修改</a>
                     </li>
                 </ul>
                 
                 <div class="tab-content">
+                    <!-- 个人信息标签页 -->
+                    <div class="tab-pane fade show active" id="profile">
+                        <form method="POST" action="{{ url_for('quickform.profile') }}">
+                            <input type="hidden" name="update_profile" value="1">
+                            
+                            <div class="form-group">
+                                <label for="username" style="color: #000; font-weight: 500;">用户名</label>
+                                <input type="text" class="form-control" id="username" name="username" value="{{ user.username if user else current_user.username }}" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="email" style="color: #000; font-weight: 500;">邮箱</label>
+                                <input type="email" class="form-control" id="email" name="email" value="{{ user.email if user else current_user.email }}" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="school" style="color: #000; font-weight: 500;">学校</label>
+                                <input type="text" class="form-control" id="school" name="school" value="{{ user.school if user else current_user.school }}" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="phone" style="color: #000; font-weight: 500;">手机号</label>
+                                <input type="text" class="form-control" id="phone" name="phone" value="{{ user.phone if user else current_user.phone }}" required>
+                                <small class="form-text text-muted">请输入11位手机号码</small>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-success mt-4">保存个人信息</button>
+                        </form>
+                    </div>
+                    
                     <!-- AI配置标签页 -->
-                    <div class="tab-pane fade show active" id="config">
+                    <div class="tab-pane fade" id="config">
                         <form method="POST" action="{{ url_for('quickform.profile') }}">
                             <input type="hidden" name="update_config" value="1">
                             
                             <div class="form-group">
-                                <label for="selected_model">选择AI模型</label>
+                                <label for="selected_model" style="color: #000; font-weight: 500;">选择AI模型</label>
                                 <select class="form-control" id="selected_model" name="selected_model" required>
                                     <option value="chat_server" {% if ai_config and ai_config.selected_model == 'chat_server' %}selected{% endif %}>硅基流动（默认）</option>
                                     <option value="deepseek" {% if ai_config and ai_config.selected_model == 'deepseek' %}selected{% endif %}>DeepSeek</option>
@@ -80,12 +113,12 @@
                             <div id="chat_server_config" class="model-config" style="{% if not ai_config or ai_config.selected_model != 'chat_server' %}display:none;{% endif %}">
                                 <h5 class="mt-4 mb-3">硅基流动 配置</h5>
                                 <div class="form-group mb-2">
-                                    <label class="form-label">API 地址（可选）</label>
+                                    <label class="form-label" style="color: #000; font-weight: 500;">API 地址（可选）</label>
                                     <input type="text" class="form-control" name="chat_server_api_url" placeholder="例如：https://your.chatserver/api/chat" value="{{ ai_config.chat_server_api_url if ai_config else '' }}">
                                     <small class="form-text text-muted">不填则使用系统默认地址</small>
                                 </div>
                                 <div class="form-group">
-                                    <label class="form-label">API Token（可选）</label>
+                                    <label class="form-label" style="color: #000; font-weight: 500;">API Token（可选）</label>
                                     <input type="text" class="form-control" name="chat_server_api_token" placeholder="请填写你的专属Token" value="{{ ai_config.chat_server_api_token if ai_config else '' }}">
                                     <small class="form-text text-muted">不填则使用系统默认Token</small>
                                 </div>
@@ -94,7 +127,7 @@
                             <div id="deepseek_config" class="model-config" style="{% if not ai_config or ai_config.selected_model != 'deepseek' %}display:none;{% endif %}">
                                 <h5 class="mt-4 mb-3">DeepSeek 配置</h5>
                                 <div class="form-group">
-                                    <label for="deepseek_api_key">API Key</label>
+                                    <label for="deepseek_api_key" style="color: #000; font-weight: 500;">API Key</label>
                                     <input type="password" class="form-control api-key-input" id="deepseek_api_key" name="deepseek_api_key" value="{{ ai_config.deepseek_api_key if ai_config and ai_config.deepseek_api_key else '' }}">
                                     <small class="form-text text-muted">请输入您的DeepSeek API密钥</small>
                                 </div>
@@ -103,7 +136,7 @@
                             <div id="doubao_config" class="model-config" style="{% if not ai_config or ai_config.selected_model != 'doubao' %}display:none;{% endif %}">
                                 <h5 class="mt-4 mb-3">豆包 配置</h5>
                                 <div class="form-group">
-                                    <label for="doubao_api_key">API Key</label>
+                                    <label for="doubao_api_key" style="color: #000; font-weight: 500;">API Key</label>
                                     <input type="password" class="form-control api-key-input" id="doubao_api_key" name="doubao_api_key" value="{{ ai_config.doubao_api_key if ai_config and ai_config.doubao_api_key else '' }}">
                                 </div>
                             </div>
@@ -111,7 +144,7 @@
                             <div id="qwen_config" class="model-config" style="{% if not ai_config or ai_config.selected_model != 'qwen' %}display:none;{% endif %}">
                                 <h5 class="mt-4 mb-3">阿里云百炼 配置</h5>
                                 <div class="form-group">
-                                    <label for="qwen_api_key">API Key</label>
+                                    <label for="qwen_api_key" style="color: #000; font-weight: 500;">API Key</label>
                                     <input type="password" class="form-control api-key-input" id="qwen_api_key" name="qwen_api_key" value="{{ ai_config.qwen_api_key if ai_config and ai_config.qwen_api_key else '' }}">
                                     <small class="form-text text-muted">请输入您的阿里云百炼 API密钥</small>
                                 </div>
@@ -142,18 +175,18 @@
                             <input type="hidden" name="change_password" value="1">
                             
                             <div class="form-group">
-                                <label for="current_password" style="color: #000;">当前密码</label>
+                                <label for="current_password" style="color: #000; font-weight: 500;">当前密码</label>
                                 <input type="password" class="form-control" id="current_password" name="current_password" required>
                             </div>
                             
                             <div class="form-group">
-                                <label for="new_password" style="color: #000;">新密码</label>
+                                <label for="new_password" style="color: #000; font-weight: 500;">新密码</label>
                                 <input type="password" class="form-control" id="new_password" name="new_password" required>
                                 <small class="form-text text-muted">密码长度至少为6个字符</small>
                             </div>
                             
                             <div class="form-group">
-                                <label for="confirm_password" style="color: #000;">确认新密码</label>
+                                <label for="confirm_password" style="color: #000; font-weight: 500;">确认新密码</label>
                                 <input type="password" class="form-control" id="confirm_password" name="confirm_password" required>
                             </div>
                             
