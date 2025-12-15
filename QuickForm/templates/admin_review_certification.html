@@ -92,11 +92,29 @@
                                 <span aria-hidden="true">&laquo;</span>
                             </a>
                         </li>
-                        {% for p in range(1, pages + 1) %}
+                        {% set start_page = [1, page - 2]|max %}
+                        {% set end_page = [pages, page + 2]|min %}
+
+                        {% if start_page > 1 %}
+                        <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_review_certification', page=1) }}">1</a></li>
+                        {% if start_page > 2 %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                        {% endif %}
+                        {% endif %}
+
+                        {% for p in range(start_page, end_page + 1) %}
                         <li class="page-item {% if p == page %}active{% endif %}">
                             <a class="page-link" href="{{ url_for('quickform.admin_review_certification', page=p) }}">{{ p }}</a>
                         </li>
                         {% endfor %}
+
+                        {% if end_page < pages %}
+                        {% if end_page < pages - 1 %}
+                        <li class="page-item disabled"><span class="page-link">…</span></li>
+                        {% endif %}
+                        <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_review_certification', page=pages) }}">{{ pages }}</a></li>
+                        {% endif %}
+
                         <li class="page-item {% if page >= pages %}disabled{% endif %}">
                             <a class="page-link" href="{{ url_for('quickform.admin_review_certification', page=page+1) }}" aria-label="下一页">
                                 <span aria-hidden="true">&raquo;</span>

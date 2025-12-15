@@ -180,11 +180,29 @@
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
-                                {% for page_num in range(1, user_pages + 1) %}
+                                {% set start_page = [1, user_page - 2]|max %}
+                                {% set end_page = [user_pages, user_page + 2]|min %}
+
+                                {% if start_page > 1 %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', user_page=1, task_page=task_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">1</a></li>
+                                {% if start_page > 2 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                {% endif %}
+
+                                {% for page_num in range(start_page, end_page + 1) %}
                                 <li class="page-item {% if page_num|int == user_page|int %}active{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', user_page=page_num, task_page=task_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ page_num }}</a>
                                 </li>
                                 {% endfor %}
+
+                                {% if end_page < user_pages %}
+                                {% if end_page < user_pages - 1 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', user_page=user_pages, task_page=task_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ user_pages }}</a></li>
+                                {% endif %}
+
                                 <li class="page-item {% if user_page >= user_pages %}disabled{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', user_page=user_page+1, task_page=task_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}" aria-label="下一页">
                                         <span aria-hidden="true">&raquo;</span>
@@ -245,11 +263,29 @@
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
-                                {% for page_num in range(1, task_pages + 1) %}
+                                {% set start_page = [1, task_page - 2]|max %}
+                                {% set end_page = [task_pages, task_page + 2]|min %}
+
+                                {% if start_page > 1 %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', task_page=1, user_page=user_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">1</a></li>
+                                {% if start_page > 2 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                {% endif %}
+
+                                {% for page_num in range(start_page, end_page + 1) %}
                                 <li class="page-item {% if page_num|int == task_page|int %}active{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', task_page=page_num, user_page=user_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ page_num }}</a>
                                 </li>
                                 {% endfor %}
+
+                                {% if end_page < task_pages %}
+                                {% if end_page < task_pages - 1 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', task_page=task_pages, user_page=user_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ task_pages }}</a></li>
+                                {% endif %}
+
                                 <li class="page-item {% if task_page >= task_pages %}disabled{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', task_page=task_page+1, user_page=user_page, html_review_page=html_review_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}" aria-label="下一页">
                                         <span aria-hidden="true">&raquo;</span>
@@ -381,11 +417,29 @@
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
-                                {% for p in range(1, html_review_pages + 1) %}
+                                {% set start_page = [1, html_review_page - 2]|max %}
+                                {% set end_page = [html_review_pages, html_review_page + 2]|min %}
+
+                                {% if start_page > 1 %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', html_review_page=1, user_page=user_page, task_page=task_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">1</a></li>
+                                {% if start_page > 2 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                {% endif %}
+
+                                {% for p in range(start_page, end_page + 1) %}
                                 <li class="page-item {% if p|int == html_review_page|int %}active{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', html_review_page=p, user_page=user_page, task_page=task_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ p }}</a>
                                 </li>
                                 {% endfor %}
+
+                                {% if end_page < html_review_pages %}
+                                {% if end_page < html_review_pages - 1 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', html_review_page=html_review_pages, user_page=user_page, task_page=task_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ html_review_pages }}</a></li>
+                                {% endif %}
+
                                 <li class="page-item {% if html_review_page >= html_review_pages %}disabled{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', html_review_page=html_review_page+1, user_page=user_page, task_page=task_page, cert_review_page=cert_review_page, tab=current_tab, q=user_search if user_search else None) }}" aria-label="下一页">
                                         <span aria-hidden="true">&raquo;</span>
@@ -526,11 +580,29 @@
                                         <span aria-hidden="true">&laquo;</span>
                                     </a>
                                 </li>
-                                {% for p in range(1, cert_review_pages + 1) %}
+                                {% set start_page = [1, cert_review_page - 2]|max %}
+                                {% set end_page = [cert_review_pages, cert_review_page + 2]|min %}
+
+                                {% if start_page > 1 %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', cert_review_page=1, user_page=user_page, task_page=task_page, html_review_page=html_review_page, tab=current_tab, q=user_search if user_search else None) }}">1</a></li>
+                                {% if start_page > 2 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                {% endif %}
+
+                                {% for p in range(start_page, end_page + 1) %}
                                 <li class="page-item {% if p|int == cert_review_page|int %}active{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', cert_review_page=p, user_page=user_page, task_page=task_page, html_review_page=html_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ p }}</a>
                                 </li>
                                 {% endfor %}
+
+                                {% if end_page < cert_review_pages %}
+                                {% if end_page < cert_review_pages - 1 %}
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                                <li class="page-item"><a class="page-link" href="{{ url_for('quickform.admin_panel', cert_review_page=cert_review_pages, user_page=user_page, task_page=task_page, html_review_page=html_review_page, tab=current_tab, q=user_search if user_search else None) }}">{{ cert_review_pages }}</a></li>
+                                {% endif %}
+
                                 <li class="page-item {% if cert_review_page >= cert_review_pages %}disabled{% endif %}">
                                     <a class="page-link" href="{{ url_for('quickform.admin_panel', cert_review_page=cert_review_page+1, user_page=user_page, task_page=task_page, html_review_page=html_review_page, tab=current_tab, q=user_search if user_search else None) }}" aria-label="下一页">
                                         <span aria-hidden="true">&raquo;</span>
