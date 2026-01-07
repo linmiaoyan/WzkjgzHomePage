@@ -48,7 +48,20 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # 初始化数据库
 DATABASE_URL = 'sqlite:///quickform.db'
-engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False})
+
+# SQLite连接配置，启用外键约束
+def _fk_pragma_on_connect(dbapi_con, connection_record):
+    """在SQLite连接时启用外键约束"""
+    dbapi_con.execute('PRAGMA foreign_keys=ON')
+
+engine = create_engine(
+    DATABASE_URL, 
+    connect_args={'check_same_thread': False}
+)
+# 注册事件监听器，确保每次连接都启用外键约束
+from sqlalchemy import event
+event.listen(engine, 'connect', _fk_pragma_on_connect)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base.metadata.create_all(engine)
 
@@ -196,7 +209,38 @@ def logout():
 def index():
     if current_user.is_authenticated:
         return redirect(url_for('dashboard'))
-    return render_template('home.html')
+    
+    # 查询加精的任务（通常是通过html_approved字段判断）
+    db = SessionLocal()
+    try:
+        # 查询已审核通过且有HTML文件的任务作为加精项目
+        featured_tasks = db.query(Task).filter(
+            Task.html_approved.isnot(None),
+            Task.html_approved == True
+        ).order_by(Task.created_at.desc()).limit(3).all()
+        
+        # 构建featured_data列表
+        featured_data = []
+        for task in featured_tasks:
+            if task.file_path and os.path.exists(task.file_path):
+                # 构建文件URL
+                file_url = url_for('uploaded_file', filename=os.path.basename(task.file_path), _external=True)
+                featured_data.append({
+                    'task': task,
+                    'file_url': file_url
+                })
+        
+        # 确保至少有3个元素（可能为空）
+        while len(featured_data) < 3:
+            featured_data.append(None)
+            
+    except Exception as e:
+        logger.error(f"获取加精任务失败: {str(e)}")
+        featured_data = [None, None, None]
+    finally:
+        db.close()
+    
+    return render_template('home.html', featured_data=featured_data)
 
 @app.route('/dashboard')
 @login_required
@@ -410,6 +454,7 @@ def edit_task(task_id):
 @app.route('/delete_task/<int:task_id>', methods=['POST'])
 @login_required
 def delete_task(task_id):
+    """删除任务，同时删除所有相关的提交数据"""
     db = SessionLocal()
     try:
         task = db.query(Task).get(task_id)
@@ -417,9 +462,37 @@ def delete_task(task_id):
             flash('无权删除此任务', 'danger')
             return redirect(url_for('dashboard'))
         
+        # 显式删除所有相关的提交数据
+        submissions = db.query(Submission).filter_by(task_id=task.id).all()
+        submission_count = len(submissions)
+        
+        for submission in submissions:
+            db.delete(submission)
+        
+        # 删除任务文件（如果存在）
+        if task.file_path and os.path.exists(task.file_path):
+            try:
+                os.remove(task.file_path)
+                logger.info(f"已删除任务文件: {task.file_path}")
+            except Exception as e:
+                logger.warning(f"删除任务文件失败: {task.file_path}, 错误: {str(e)}")
+        
+        # 删除任务
         db.delete(task)
         db.commit()
-        flash('任务已删除', 'success')
+        
+        if submission_count > 0:
+            flash(f'任务已删除，同时删除了 {submission_count} 条提交数据', 'success')
+            logger.info(f"用户 {current_user.id} 删除了任务 {task_id}，同时删除了 {submission_count} 条提交数据")
+        else:
+            flash('任务已删除', 'success')
+            logger.info(f"用户 {current_user.id} 删除了任务 {task_id}")
+        
+        return redirect(url_for('dashboard'))
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除任务失败: {str(e)}", exc_info=True)
+        flash(f'删除任务失败: {str(e)}', 'danger')
         return redirect(url_for('dashboard'))
     finally:
         db.close()
@@ -720,6 +793,7 @@ def delete_all_submissions(task_id):
         db.close()
 
 # 注册Blueprint兼容的端点别名，确保模板中的 url_for('quickform.xxx') 可正常解析
+# 通过修改Flask的url_map来添加别名endpoint
 _endpoint_aliases = {
     'index': 'quickform.index',
     'register': 'quickform.register',
@@ -752,11 +826,33 @@ _endpoint_aliases = {
     'admin_review_html_action': 'quickform.admin_review_html_action',
     'remove_submission': 'quickform.remove_submission',
     'clear_all_submissions': 'quickform.clear_all_submissions',
+    'delete_submission': 'quickform.delete_submission',
+    'delete_all_submissions': 'quickform.delete_all_submissions',
 }
+
+# 为每个原始endpoint创建别名endpoint
 for original, alias in _endpoint_aliases.items():
     view_func = app.view_functions.get(original)
     if view_func:
+        # 复制视图函数到别名
         app.view_functions[alias] = view_func
+        # 为别名endpoint添加路由规则
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint == original:
+                # 创建新的规则，使用别名endpoint
+                from werkzeug.routing import Rule
+                new_rule = Rule(
+                    rule.rule,
+                    endpoint=alias,
+                    methods=rule.methods,
+                    defaults=rule.defaults,
+                    subdomain=rule.subdomain,
+                    strict_slashes=rule.strict_slashes,
+                    redirect_to=rule.redirect_to,
+                    alias=rule.alias,
+                    host=rule.host
+                )
+                app.url_map.add(new_rule)
 
 
 if __name__ == '__main__':

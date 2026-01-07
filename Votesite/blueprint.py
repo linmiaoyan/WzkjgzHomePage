@@ -153,7 +153,6 @@ def admin():
     if guard:
         return guard
     surveys = Survey.query.filter_by(is_active=True).all()
-    # 明确指定使用 VoteSite 的模板，使用完整的模板路径避免与QuickForm冲突
     return render_template('admin.html', surveys=surveys)
 
 @votesite_bp.route('/admin/create_survey', methods=['POST'])

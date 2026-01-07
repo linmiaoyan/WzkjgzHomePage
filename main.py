@@ -1,3 +1,15 @@
+# ==================== 数据库配置 ====================
+# 选择数据库类型: 'sqlite' 或 'mysql'
+# 'sqlite' - 使用SQLite数据库（quickform.db文件）
+# 'mysql' - 使用MySQL数据库（需要配置环境变量：MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE）
+# 
+# 回滚说明：
+# 如果MySQL相关功能出错，只需将下面的值改回 'sqlite' 即可回滚到SQLite数据库
+# 修改后重启应用即可，无需其他操作
+# 
+QUICKFORM_DATABASE_TYPE = 'mysql'  # 默认使用SQLite
+# ====================================================
+
 from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, make_response
 from flask_socketio import SocketIO
 import datetime
@@ -39,7 +51,7 @@ login_manager.init_app(app)
 
 # 导入并注册QuickForm Blueprint
 from QuickForm.blueprint import quickform_bp, init_quickform
-init_quickform(app, login_manager)
+init_quickform(app, login_manager, database_type=QUICKFORM_DATABASE_TYPE)
 # 在init之后导入User和SessionLocal
 from QuickForm.blueprint import SessionLocal, User as QuickFormUser
 
@@ -113,6 +125,7 @@ def load_user(user_id):
 # 注册Blueprint
 app.register_blueprint(quickform_bp, url_prefix='/quickform')
 app.register_blueprint(votesite_bp, url_prefix='/votesite')
+# ScoreAnalysis已在init_score_analysis中注册
 
 # 确保templates文件夹存在
 templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')

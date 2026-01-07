@@ -6,3 +6,4 @@ Flask-Bcrypt>=1.0.0
 python-dotenv>=1.0.0
 pandas>=2.0.0
 matplotlib>=3.5.0
+pymysql>=1.1.0

@@ -156,6 +156,9 @@
                                                         {% if user.role == 'admin' %}取消管理员{% else %}设为管理员{% endif %}
                                                     </button>
                                                 </form>
+                                                <button type="button" class="btn btn-sm btn-info" onclick="resetPassword({{ user.id }}, '{{ user.username }}')">
+                                                    重置密码
+                                                </button>
                                              </div>
                                             {% else %}
                                             <span class="text-muted">当前用户</span>
@@ -801,6 +804,67 @@
 
         updateButton();
     })();
+
+    // 密码重置功能
+    function resetPassword(userId, username) {
+        if (!confirm(`确定要将用户 "${username}" 的密码重置为 123456 吗？`)) {
+            return;
+        }
+        
+        fetch(`{{ url_for('quickform.admin_reset_password') }}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `user_id=${userId}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // 显示复制文本的模态框
+                const modal = document.createElement('div');
+                modal.className = 'modal fade show';
+                modal.style.display = 'block';
+                modal.style.backgroundColor = 'rgba(0,0,0,0.5)';
+                modal.innerHTML = `
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">密码重置成功</h5>
+                                <button type="button" class="btn-close" onclick="this.closest('.modal').remove()"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p>用户 "${username}" 的密码已重置为：<strong>123456</strong></p>
+                                <div class="mb-3">
+                                    <label class="form-label">请复制以下信息：</label>
+                                    <textarea class="form-control" id="passwordInfo" rows="3" readonly>用户名：${username}
+密码：123456</textarea>
+                                </div>
+                                <button class="btn btn-primary" onclick="copyPasswordInfo()">复制信息</button>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" onclick="this.closest('.modal').remove()">关闭</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } else {
+                alert('密码重置失败：' + (data.message || '未知错误'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('密码重置失败：网络错误');
+        });
+    }
+
+    function copyPasswordInfo() {
+        const textarea = document.getElementById('passwordInfo');
+        textarea.select();
+        document.execCommand('copy');
+        alert('信息已复制到剪贴板');
+    }
 </script>
 {% endblock %}
 {% endblock %}

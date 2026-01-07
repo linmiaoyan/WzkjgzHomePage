@@ -89,7 +89,7 @@ class Task(Base):
 class Submission(Base):
     __tablename__ = 'submission'
     id = Column(Integer, primary_key=True)
-    task_id = Column(Integer, ForeignKey('task.id'))
+    task_id = Column(Integer, ForeignKey('task.id', ondelete='CASCADE'))  # 数据库层面级联删除
     task = relationship('Task', back_populates='submission')
     data = Column(Text, nullable=False)
     submitted_at = Column(DateTime, default=datetime.now)

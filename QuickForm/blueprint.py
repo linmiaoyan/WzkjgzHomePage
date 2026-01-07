@@ -93,7 +93,94 @@ def parse_urlencoded(raw_data):
     return result
 
 # 数据库配置（相对于QuickForm目录）
-DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
+# 默认从环境变量读取，但可以通过init_quickform的参数强制指定
+_database_type = None  # 将在init_quickform中设置
+
+def _init_database(database_type=None):
+    """初始化数据库连接"""
+    global DATABASE_URL, engine, SessionLocal
+    
+    # 如果指定了数据库类型，使用指定的类型
+    if database_type:
+        if database_type.lower() == 'mysql':
+            # 强制使用MySQL
+            MYSQL_HOST = os.getenv('MYSQL_HOST', '')
+            MYSQL_PORT = os.getenv('MYSQL_PORT', '3306')
+            MYSQL_USER = os.getenv('MYSQL_USER', '')
+            MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '')
+            MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'quickform')
+            
+            if MYSQL_HOST and MYSQL_USER and MYSQL_PASSWORD:
+                DATABASE_URL = f'mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4'
+                logger.info(f"强制使用MySQL数据库: {MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}")
+            else:
+                logger.error("指定使用MySQL但环境变量未配置，回退到SQLite")
+                DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
+                logger.info("使用SQLite数据库（MySQL配置缺失）")
+        else:
+            # 强制使用SQLite
+            DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
+            logger.info("强制使用SQLite数据库")
+    else:
+        # 自动选择：优先使用环境变量中的MySQL配置，如果没有则使用SQLite
+        MYSQL_HOST = os.getenv('MYSQL_HOST', '')
+        MYSQL_PORT = os.getenv('MYSQL_PORT', '3306')
+        MYSQL_USER = os.getenv('MYSQL_USER', '')
+        MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '')
+        MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'quickform')
+        
+        if MYSQL_HOST and MYSQL_USER and MYSQL_PASSWORD:
+            # 使用MySQL
+            DATABASE_URL = f'mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4'
+            logger.info(f"使用MySQL数据库: {MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}")
+        else:
+            # 使用SQLite（向后兼容）
+            DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
+            logger.info("使用SQLite数据库（向后兼容模式）")
+    
+    # 初始化SQLAlchemy引擎
+    mysql_connection_failed = False
+    if DATABASE_URL.startswith('mysql'):
+        # MySQL连接配置
+        try:
+            engine = create_engine(
+                DATABASE_URL,
+                pool_pre_ping=True,  # 自动重连
+                pool_recycle=3600,   # 连接回收时间
+                echo=False
+            )
+            # 测试连接是否可用
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info("MySQL连接测试成功")
+        except Exception as e:
+            logger.error(f"MySQL连接失败: {str(e)}，自动回退到SQLite")
+            mysql_connection_failed = True
+            # 回退到SQLite
+            DATABASE_URL = f'sqlite:///{os.path.join(QUICKFORM_DIR, "quickform.db")}'
+    
+    # 如果MySQL连接失败或使用SQLite，初始化SQLite引擎
+    if mysql_connection_failed or DATABASE_URL.startswith('sqlite'):
+        # SQLite连接配置，启用外键约束
+        def _fk_pragma_on_connect(dbapi_con, connection_record):
+            """在SQLite连接时启用外键约束"""
+            dbapi_con.execute('PRAGMA foreign_keys=ON')
+        
+        engine = create_engine(
+            DATABASE_URL, 
+            connect_args={'check_same_thread': False},
+            poolclass=None  # SQLite不需要连接池
+        )
+        # 注册事件监听器，确保每次连接都启用外键约束
+        from sqlalchemy import event
+        event.listen(engine, 'connect', _fk_pragma_on_connect)
+        if mysql_connection_failed:
+            logger.info("已回退到SQLite数据库")
+    
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# 初始化数据库（默认行为，向后兼容）
+_init_database()
 
 MODEL_LABELS = {
     'chat_server': '硅基流动',
@@ -102,9 +189,7 @@ MODEL_LABELS = {
     'qwen': '阿里云百炼'
 }
 
-# 初始化SQLAlchemy
-engine = create_engine(DATABASE_URL, connect_args={'check_same_thread': False})
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+# 注意：engine和SessionLocal现在在_init_database()函数中初始化
 
 # 全局变量（将在init函数中设置）
 bcrypt = None
@@ -237,14 +322,31 @@ def login():
         
         db = SessionLocal()
         try:
-            user = db.query(User).filter_by(username=username).first()
+            # 尝试多种方式查找用户：用户名、邮箱、手机号、昵称
+            user = db.query(User).filter(
+                (User.username == username) | 
+                (User.email == username) | 
+                (User.phone == username)
+            ).first()
             
             if user and bcrypt.check_password_hash(user.password, password):
+                # 登录成功，清除失败次数
+                from flask import session
+                session.pop('login_fail_count', None)
                 login_user(user, remember=remember)
                 next_page = request.args.get('next')
                 return redirect(next_page) if next_page else redirect(url_for('quickform.dashboard'))
             else:
-                flash('用户名或密码错误', 'danger')
+                # 登录失败，检查失败次数
+                from flask import session
+                fail_count = session.get('login_fail_count', 0) + 1
+                session['login_fail_count'] = fail_count
+                
+                # 如果连续失败3次或以上，给出提示
+                if fail_count >= 3:
+                    flash('账号密码无特殊限制，您的账号可能为手机号或邮箱或昵称或姓名', 'info')
+                else:
+                    flash('用户名或密码错误', 'danger')
         finally:
             db.close()
     
@@ -332,7 +434,7 @@ def create_task():
                     
                     # 如果是HTML文件，设置审核状态
                     if filepath.lower().endswith(('.html', '.htm')):
-                        if getattr(current_user, 'is_certified', False):
+                        if current_user.is_admin() or getattr(current_user, 'is_certified', False):
                             task.html_approved = 1
                             task.html_approved_by = current_user.id
                             task.html_approved_at = datetime.now()
@@ -360,7 +462,7 @@ def create_task():
                     
                     # 如果是HTML文件，设置审核状态
                     if filepath.lower().endswith(('.html', '.htm')):
-                        if getattr(current_user, 'is_certified', False):
+                        if current_user.is_admin() or getattr(current_user, 'is_certified', False):
                             task.html_approved = 1
                             task.html_approved_by = current_user.id
                             task.html_approved_at = datetime.now()
@@ -521,7 +623,7 @@ def edit_task(task_id):
                     
                     # 如果是HTML文件，设置审核状态
                     if filepath.lower().endswith(('.html', '.htm')):
-                        if getattr(current_user, 'is_certified', False):
+                        if current_user.is_admin() or getattr(current_user, 'is_certified', False):
                             task.html_approved = 1
                             task.html_approved_by = current_user.id
                             task.html_approved_at = datetime.now()
@@ -560,7 +662,7 @@ def edit_task(task_id):
                     
                     # 如果是HTML文件，设置审核状态
                     if filepath.lower().endswith(('.html', '.htm')):
-                        if getattr(current_user, 'is_certified', False):
+                        if current_user.is_admin() or getattr(current_user, 'is_certified', False):
                             task.html_approved = 1
                             task.html_approved_by = current_user.id
                             task.html_approved_at = datetime.now()
@@ -602,7 +704,7 @@ def edit_task(task_id):
 @quickform_bp.route('/delete_task/<int:task_id>', methods=['POST'])
 @login_required
 def delete_task(task_id):
-    """删除任务"""
+    """删除任务，同时删除所有相关的提交数据"""
     db = SessionLocal()
     try:
         task = db.get(Task, task_id)
@@ -613,9 +715,37 @@ def delete_task(task_id):
             flash('无权删除此任务', 'danger')
             return redirect(url_for('quickform.dashboard'))
         
+        # 显式删除所有相关的提交数据
+        submissions = db.query(Submission).filter_by(task_id=task.id).all()
+        submission_count = len(submissions)
+        
+        for submission in submissions:
+            db.delete(submission)
+        
+        # 删除任务文件（如果存在）
+        if task.file_path and os.path.exists(task.file_path):
+            try:
+                os.remove(task.file_path)
+                logger.info(f"已删除任务文件: {task.file_path}")
+            except Exception as e:
+                logger.warning(f"删除任务文件失败: {task.file_path}, 错误: {str(e)}")
+        
+        # 删除任务
         db.delete(task)
         db.commit()
-        flash('任务已删除', 'success')
+        
+        if submission_count > 0:
+            flash(f'任务已删除，同时删除了 {submission_count} 条提交数据', 'success')
+            logger.info(f"用户 {current_user.id} 删除了任务 {task_id}，同时删除了 {submission_count} 条提交数据")
+        else:
+            flash('任务已删除', 'success')
+            logger.info(f"用户 {current_user.id} 删除了任务 {task_id}")
+        
+        return redirect(url_for('quickform.dashboard'))
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除任务失败: {str(e)}", exc_info=True)
+        flash(f'删除任务失败: {str(e)}', 'danger')
         return redirect(url_for('quickform.dashboard'))
     finally:
         db.close()
@@ -1666,6 +1796,40 @@ def admin_set_task_limit(user_id):
     
     return redirect(url_for('quickform.admin_panel', tab='users'))
 
+@quickform_bp.route('/admin/reset_password', methods=['POST'])
+@admin_required
+def admin_reset_password():
+    """管理员重置用户密码为123456"""
+    user_id = request.form.get('user_id', type=int)
+    if not user_id:
+        return jsonify({'success': False, 'message': '缺少用户ID'}), 400
+    
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if not user:
+            return jsonify({'success': False, 'message': '用户不存在'}), 404
+        
+        if user.id == current_user.id:
+            return jsonify({'success': False, 'message': '不能重置自己的密码'}), 400
+        
+        # 重置密码为123456
+        hashed_password = bcrypt.generate_password_hash('123456').decode('utf-8')
+        user.password = hashed_password
+        db.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'用户 {user.username} 的密码已重置为 123456',
+            'username': user.username
+        })
+    except Exception as e:
+        db.rollback()
+        logger.error(f"重置密码失败: {str(e)}")
+        return jsonify({'success': False, 'message': f'重置失败: {str(e)}'}), 500
+    finally:
+        db.close()
+
 @quickform_bp.route('/admin/review_html')
 @admin_required
 def admin_review_html():
@@ -2045,12 +2209,23 @@ def clear_all_submissions(task_id):
         db.close()
 
 
-def init_quickform(app, login_manager_instance=None):
+def init_quickform(app, login_manager_instance=None, database_type=None):
     """
     初始化QuickForm Blueprint
     在主应用中调用此函数来设置LoginManager、Bcrypt等
+    
+    参数:
+        app: Flask应用实例
+        login_manager_instance: LoginManager实例（可选）
+        database_type: 数据库类型，'sqlite' 或 'mysql'（可选，如果指定则强制使用该类型）
     """
-    global bcrypt, login_manager
+    global bcrypt, login_manager, _database_type
+    
+    # 如果指定了数据库类型，重新初始化数据库
+    if database_type:
+        _database_type = database_type.lower()
+        logger.info(f"重新初始化数据库，使用类型: {_database_type}")
+        _init_database(_database_type)
     
     # 初始化Flask-Bcrypt
     bcrypt = Bcrypt(app)
